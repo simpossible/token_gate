@@ -8,25 +8,22 @@ Token Gate is a local proxy gateway that manages multiple Claude API keys for AI
 
 ## Release Process
 
-Releasing a new version is a single command:
+Releasing a new version is a single command (no `gh` CLI auth needed — only SSH keys):
 
 ```bash
-# Prerequisite (one-time): authenticate GitHub CLI
-gh auth login -h github.com
-
 # Release (run from project root)
-./scripts/release.sh v0.1.2
+./scripts/release.sh v0.1.3
 ```
 
 The script does everything in order:
-1. Cross-compiles for `darwin/arm64` and `darwin/amd64`
-2. Packages into `.tar.gz` files in `server/`
-3. Tags the commit and pushes tag + master to GitHub
-4. Creates a GitHub Release and uploads both tarballs
-5. Clones `simpossible/homebrew-tap`, regenerates the formula with updated version and SHA256s, and pushes
+1. Tags the commit and pushes tag + master to GitHub
+2. GitHub Actions (`.github/workflows/release.yml`) triggers automatically: cross-compiles for `darwin/arm64` and `darwin/amd64`, uploads tarballs + `checksums.txt` as release assets
+3. Script polls until `checksums.txt` is available (~5-8 min)
+4. Fetches CI-built SHA256s from `checksums.txt`
+5. Clones `simpossible/homebrew-tap` via SSH, regenerates the formula with the new version and SHA256s, and pushes
 
 **Common pitfalls:**
-- `gh auth login` must be done before running the script — `git push` works via SSH but creating a GitHub Release requires the `gh` OAuth token.
+- Never use `gh release create` locally — the GitHub Actions workflow handles the Release. Local builds produce different SHA256s than CI builds.
 - Run the script from the **project root** (where `server/` and `web/` live), not from inside `server/`.
 - The formula in `homebrew/token_gate.rb` is not the one Homebrew uses — it's a reference copy. The live formula is in the `homebrew-tap` repo (`git@github.com:simpossible/homebrew-tap.git`), updated automatically by the script.
 - After release, users install with:
