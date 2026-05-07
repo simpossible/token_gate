@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +16,8 @@ import (
 )
 
 func main() {
+	log.Println("=== Token Gate Starting ===")
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("get home dir: %v", err)
@@ -26,12 +27,17 @@ func main() {
 	webDir := filepath.Join(dataDir, "web")
 	dbPath := filepath.Join(dataDir, "token_gate.db")
 
+	log.Printf("[MAIN] Data directory: %s", dataDir)
+	log.Printf("[MAIN] Database path: %s", dbPath)
+
 	// 1. Create data directory
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("create data dir: %v", err)
 	}
+	log.Println("[MAIN] Data directory ready")
 
 	// 2. Initialize database
+	log.Println("[MAIN] Opening database...")
 	db, err := database.Open(dbPath)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
@@ -46,16 +52,21 @@ func main() {
 	if err := os.MkdirAll(webDir, 0755); err != nil {
 		log.Fatalf("create web dir: %v", err)
 	}
+	log.Println("[MAIN] Extracting web files...")
 	if err := web.ExtractWebFiles(webDir); err != nil {
-		log.Printf("warning: extract web files: %v", err)
+		log.Printf("[MAIN] warning: extract web files: %v", err)
+	} else {
+		log.Println("[MAIN] Web files extracted")
 	}
 
 	// 4. Register agent processors
 	processors := []agent.AgentProcessor{
 		agent.NewClaudeCodeProcessor(),
 	}
+	log.Printf("[MAIN] Registered %d agent processors", len(processors))
 
 	// 5. Load memory cache
+	log.Println("[MAIN] Loading active config cache...")
 	cache := config.NewCache(db)
 	if err := cache.Load(); err != nil {
 		log.Fatalf("load cache: %v", err)
@@ -67,28 +78,33 @@ func main() {
 		log.Fatalf("check db: %v", err)
 	}
 	if isEmpty {
+		log.Println("[MAIN] Database is empty, importing existing Claude Code config...")
 		importExistingConfig(db, cache, processors)
+	} else {
+		log.Println("[MAIN] Database already populated, skipping auto-import")
 	}
 
 	// 7. Start servers
+	log.Println("=== Starting Servers ===")
 	proxyHandler := proxy.NewProxy(cache, db)
 	apiHandler := api.NewAPI(db, cache, processors)
 
 	go func() {
-		log.Println("API Proxy listening on http://127.0.0.1:12121")
+		log.Println("[SERVER] API Proxy starting on http://127.0.0.1:12121")
 		if err := http.ListenAndServe("127.0.0.1:12121", proxyHandler); err != nil {
 			log.Fatalf("proxy server: %v", err)
 		}
 	}()
 
 	go func() {
-		log.Println("Config API listening on http://127.0.0.1:12122")
+		log.Println("[SERVER] Config API starting on http://127.0.0.1:12122")
 		if err := http.ListenAndServe("127.0.0.1:12122", apiHandler.Routes()); err != nil {
 			log.Fatalf("api server: %v", err)
 		}
 	}()
 
-	log.Println("Web GUI listening on http://127.0.0.1:12123")
+	log.Println("[SERVER] Web GUI starting on http://127.0.0.1:12123")
+	log.Println("=== Token Gate Ready ===")
 	if err := http.ListenAndServe("127.0.0.1:12123", web.Handler()); err != nil {
 		log.Fatalf("web server: %v", err)
 	}
@@ -97,18 +113,23 @@ func main() {
 func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
 	home, _ := os.UserHomeDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	log.Printf("[MAIN] Checking for existing Claude Code config at: %s", settingsPath)
+
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
+		log.Printf("[MAIN] No existing settings file found, skipping import")
 		return
 	}
 
 	var settings map[string]interface{}
 	if err := json.Unmarshal(data, &settings); err != nil {
+		log.Printf("[MAIN] Failed to parse settings file: %v", err)
 		return
 	}
 
 	env, ok := settings["env"].(map[string]interface{})
 	if !ok {
+		log.Printf("[MAIN] No env section in settings file")
 		return
 	}
 
@@ -116,13 +137,16 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 	apiKey := ""
 	if v, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok && v != "" && v != "placeholder" {
 		apiKey = v
+		log.Printf("[MAIN] Found ANTHROPIC_AUTH_TOKEN in settings")
 	}
 	if apiKey == "" {
 		if v, ok := env["ANTHROPIC_API_KEY"].(string); ok && v != "" && v != "placeholder" {
 			apiKey = v
+			log.Printf("[MAIN] Found ANTHROPIC_API_KEY in settings")
 		}
 	}
 	if apiKey == "" {
+		log.Printf("[MAIN] No valid API key found in settings, skipping import")
 		return
 	}
 
@@ -130,12 +154,16 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 	baseURL := "https://api.anthropic.com"
 	if v, ok := env["ANTHROPIC_BASE_URL"].(string); ok && v != "" && v != "http://127.0.0.1:12121/claude_code" {
 		baseURL = v
+		log.Printf("[MAIN] Found custom base URL: %s", baseURL)
+	} else if v == "http://127.0.0.1:12121/claude_code" {
+		log.Printf("[MAIN] Base URL already points to token_gate proxy, using default")
 	}
 
 	modelStr := "claude-sonnet-4-6"
 
+	log.Printf("[MAIN] Importing config: name=default, url=%s, model=%s", baseURL, modelStr)
 	if err := db.ImportExistingConfig("default", baseURL, apiKey, modelStr); err != nil {
-		log.Printf("warning: import existing config: %v", err)
+		log.Printf("[MAIN] warning: import existing config: %v", err)
 		return
 	}
 
@@ -155,5 +183,5 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 		}
 	}
 
-	fmt.Println("Imported existing Claude Code configuration")
+	log.Println("[MAIN] Successfully imported existing Claude Code configuration")
 }

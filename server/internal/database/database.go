@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"token_gate/internal/model"
@@ -16,6 +17,7 @@ type DB struct {
 }
 
 func Open(path string) (*DB, error) {
+	log.Printf("[DB] Opening database: %s", path)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
@@ -23,10 +25,12 @@ func Open(path string) (*DB, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
+	log.Printf("[DB] Database opened successfully")
 	return &DB{db}, nil
 }
 
 func (db *DB) InitSchema() error {
+	log.Printf("[DB] Initializing schema")
 	schema := `
 	CREATE TABLE IF NOT EXISTS token_config (
 		id TEXT PRIMARY KEY,
@@ -55,6 +59,11 @@ func (db *DB) InitSchema() error {
 	);
 	`
 	_, err := db.Exec(schema)
+	if err != nil {
+		log.Printf("[DB] Schema initialization failed: %v", err)
+	} else {
+		log.Printf("[DB] Schema initialized successfully")
+	}
 	return err
 }
 
@@ -77,13 +86,16 @@ func (db *DB) CreateTokenConfig(req *model.CreateConfigRequest) (*model.TokenCon
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+	log.Printf("[DB] Creating token config: id=%s, name=%s", c.ID, c.Name)
 	_, err := db.Exec(
 		"INSERT INTO token_config (id, name, url, api_key, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		c.ID, c.Name, c.URL, c.APIKey, c.Model, c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
+		log.Printf("[DB] Create token config failed: %v", err)
 		return nil, err
 	}
+	log.Printf("[DB] Token config created successfully: id=%s", c.ID)
 	return c, nil
 }
 
@@ -126,6 +138,7 @@ func (db *DB) UpdateTokenConfig(id string, req *model.UpdateConfigRequest) (*mod
 		return nil, fmt.Errorf("config not found")
 	}
 
+	log.Printf("[DB] Updating token config: id=%s", id)
 	if req.Name != nil {
 		c.Name = *req.Name
 	}
@@ -144,10 +157,16 @@ func (db *DB) UpdateTokenConfig(id string, req *model.UpdateConfigRequest) (*mod
 		"UPDATE token_config SET name=?, url=?, api_key=?, model=?, updated_at=? WHERE id=?",
 		c.Name, c.URL, c.APIKey, c.Model, c.UpdatedAt, c.ID,
 	)
+	if err != nil {
+		log.Printf("[DB] Update token config failed: %v", err)
+		return nil, err
+	}
+	log.Printf("[DB] Token config updated successfully: id=%s, name=%s", c.ID, c.Name)
 	return c, err
 }
 
 func (db *DB) DeleteTokenConfig(id string) error {
+	log.Printf("[DB] Deleting token config: id=%s", id)
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -156,17 +175,25 @@ func (db *DB) DeleteTokenConfig(id string) error {
 
 	_, err = tx.Exec("DELETE FROM usage WHERE token_id = ?", id)
 	if err != nil {
+		log.Printf("[DB] Delete usage failed: %v", err)
 		return err
 	}
 	_, err = tx.Exec("DELETE FROM valid_config WHERE token_id = ?", id)
 	if err != nil {
+		log.Printf("[DB] Delete valid_config failed: %v", err)
 		return err
 	}
 	_, err = tx.Exec("DELETE FROM token_config WHERE id = ?", id)
 	if err != nil {
+		log.Printf("[DB] Delete token_config failed: %v", err)
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		log.Printf("[DB] Delete transaction commit failed: %v", err)
+		return err
+	}
+	log.Printf("[DB] Token config deleted successfully: id=%s", id)
+	return nil
 }
 
 // --- ValidConfig ---
@@ -202,6 +229,7 @@ func (db *DB) ListActiveConfigs() ([]*model.ValidConfig, error) {
 }
 
 func (db *DB) ActivateConfig(tokenID, agentType string) error {
+	log.Printf("[DB] Activating config: token_id=%s, agent_type=%s", tokenID, agentType)
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -210,6 +238,7 @@ func (db *DB) ActivateConfig(tokenID, agentType string) error {
 
 	_, err = tx.Exec("DELETE FROM valid_config WHERE agent_type = ?", agentType)
 	if err != nil {
+		log.Printf("[DB] Delete old valid_config failed: %v", err)
 		return err
 	}
 
@@ -218,14 +247,26 @@ func (db *DB) ActivateConfig(tokenID, agentType string) error {
 		uuid.New().String(), tokenID, agentType, time.Now(),
 	)
 	if err != nil {
+		log.Printf("[DB] Insert new valid_config failed: %v", err)
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		log.Printf("[DB] Activate transaction commit failed: %v", err)
+		return err
+	}
+	log.Printf("[DB] Config activated successfully: token_id=%s, agent_type=%s", tokenID, agentType)
+	return nil
 }
 
 func (db *DB) DeactivateConfig(agentType string) error {
+	log.Printf("[DB] Deactivating config for agent_type: %s", agentType)
 	_, err := db.Exec("DELETE FROM valid_config WHERE agent_type = ?", agentType)
-	return err
+	if err != nil {
+		log.Printf("[DB] Deactivate config failed: %v", err)
+		return err
+	}
+	log.Printf("[DB] Config deactivated successfully: agent_type=%s", agentType)
+	return nil
 }
 
 func (db *DB) GetActiveAgentsForConfig(tokenID string) ([]string, error) {
@@ -249,10 +290,15 @@ func (db *DB) GetActiveAgentsForConfig(tokenID string) ([]string, error) {
 // --- Usage ---
 
 func (db *DB) RecordUsage(tokenID, agentType string, inputTokens, outputTokens int, reqModel, requestPath string) error {
+	log.Printf("[DB] Recording usage: token_id=%s, agent=%s, input=%d, output=%d, model=%s, path=%s",
+		tokenID, agentType, inputTokens, outputTokens, reqModel, requestPath)
 	_, err := db.Exec(
 		"INSERT INTO usage (id, token_id, agent_type, input_tokens, output_tokens, model, request_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		uuid.New().String(), tokenID, agentType, inputTokens, outputTokens, reqModel, requestPath, time.Now(),
 	)
+	if err != nil {
+		log.Printf("[DB] Record usage failed: %v", err)
+	}
 	return err
 }
 
@@ -321,6 +367,7 @@ func (db *DB) GetUsageSummary(tokenID string) (inputTokens, outputTokens int, er
 
 // Scan existing Claude Code settings for auto-import
 func (db *DB) ImportExistingConfig(name, url, apiKey, modelStr string) error {
+	log.Printf("[DB] Importing existing config: name=%s, url=%s", name, url)
 	c, err := db.CreateTokenConfig(&model.CreateConfigRequest{
 		Name:   name,
 		URL:    url,
@@ -328,7 +375,13 @@ func (db *DB) ImportExistingConfig(name, url, apiKey, modelStr string) error {
 		Model:  modelStr,
 	})
 	if err != nil {
+		log.Printf("[DB] Import existing config failed: %v", err)
 		return err
 	}
-	return db.ActivateConfig(c.ID, "claude_code")
+	if err := db.ActivateConfig(c.ID, "claude_code"); err != nil {
+		log.Printf("[DB] Activate imported config failed: %v", err)
+		return err
+	}
+	log.Printf("[DB] Import existing config success: id=%s", c.ID)
+	return nil
 }
