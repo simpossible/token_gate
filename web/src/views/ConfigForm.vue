@@ -29,10 +29,10 @@
         <el-form-item label="Model" prop="model">
           <el-select v-model="form.model" filterable allow-create default-first-option style="width: 100%"
             placeholder="选择或输入 model 名称">
-            <el-option value="claude-sonnet-4-6" label="Claude Sonnet 4.6" />
-            <el-option value="claude-opus-4-7" label="Claude Opus 4.7" />
-            <el-option value="claude-haiku-4-5-20251001" label="Claude Haiku 4.5" />
-            <el-option value="opus[1m]" label="Claude Opus [1M]" />
+            <el-option value="claude-sonnet-4-6" label="claude-sonnet-4-6" />
+            <el-option value="claude-opus-4-7" label="claude-opus-4-7" />
+            <el-option value="claude-haiku-4-5-20251001" label="claude-haiku-4-5-20251001" />
+            <el-option value="opus[1m]" label="opus[1m]" />
           </el-select>
         </el-form-item>
 
