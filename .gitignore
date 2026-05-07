@@ -1,1 +1,4 @@
 web/node_modules
+web/dist
+server/token_gate
+

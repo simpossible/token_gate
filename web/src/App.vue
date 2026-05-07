@@ -17,7 +17,7 @@
           :config-id="selectedConfigId"
           :agents="agents"
           @back="currentPage = 'list'"
-          @updated="loadConfigs"
+          @updated="onDetailUpdated"
         />
         <ConfigForm
           v-else-if="currentPage === 'create'"
@@ -69,6 +69,10 @@ function openCreate() {
 function openEdit(id) {
   selectedConfigId.value = id
   currentPage.value = 'edit'
+}
+
+async function onDetailUpdated() {
+  await Promise.all([loadConfigs(), loadAgents()])
 }
 
 async function onCreated() {

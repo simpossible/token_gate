@@ -112,19 +112,23 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 		return
 	}
 
+	// ANTHROPIC_AUTH_TOKEN takes priority; skip "placeholder" written by token_gate itself
 	apiKey := ""
-	if v, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok && v != "" {
+	if v, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok && v != "" && v != "placeholder" {
 		apiKey = v
 	}
-	if v, ok := env["ANTHROPIC_API_KEY"].(string); ok && v != "" {
-		apiKey = v
+	if apiKey == "" {
+		if v, ok := env["ANTHROPIC_API_KEY"].(string); ok && v != "" && v != "placeholder" {
+			apiKey = v
+		}
 	}
 	if apiKey == "" {
 		return
 	}
 
+	// Skip base URL if it's already the token_gate proxy (set by a previous OnActivate)
 	baseURL := "https://api.anthropic.com"
-	if v, ok := env["ANTHROPIC_BASE_URL"].(string); ok && v != "" {
+	if v, ok := env["ANTHROPIC_BASE_URL"].(string); ok && v != "" && v != "http://127.0.0.1:12121/claude_code" {
 		baseURL = v
 	}
 

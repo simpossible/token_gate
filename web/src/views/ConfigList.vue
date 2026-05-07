@@ -28,12 +28,6 @@
           <span class="info-label">Model</span>
           <span class="info-value">{{ config.model }}</span>
         </div>
-        <div class="info-row">
-          <span class="info-label">Usage</span>
-          <span class="info-value usage-value">
-            {{ formatTokens(config._input_tokens) }} in / {{ formatTokens(config._output_tokens) }} out
-          </span>
-        </div>
       </div>
     </div>
 
@@ -65,11 +59,6 @@ function agentLabel(agent) {
   return found ? found.label : agent
 }
 
-function formatTokens(tokens) {
-  if (!tokens) return '0'
-  if (tokens >= 10000) return (tokens / 10000).toFixed(1) + '万'
-  return tokens.toLocaleString()
-}
 </script>
 
 <style scoped>
@@ -106,5 +95,4 @@ function formatTokens(tokens) {
 .info-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 13px; }
 .info-label { color: #909399; min-width: 48px; }
 .info-value { color: #606266; word-break: break-all; }
-.usage-value { font-family: monospace; }
 </style>

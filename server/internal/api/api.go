@@ -28,6 +28,7 @@ func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent
 
 func (a *API) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.Use(corsMiddleware)
 	r.Post("/api/configs", a.createConfig)
 	r.Get("/api/configs", a.listConfigs)
 	r.Get("/api/agents", a.listAgents)
@@ -40,6 +41,19 @@ func (a *API) Routes() http.Handler {
 		r.Post("/deactivate", a.deactivateConfig)
 	})
 	return r
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
