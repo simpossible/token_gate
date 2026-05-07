@@ -13,7 +13,18 @@
         </el-form-item>
 
         <el-form-item label="API URL" prop="url">
-          <el-input v-model="form.url" placeholder="https://api.anthropic.com" />
+          <el-select
+            v-model="form.url"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="https://api.anthropic.com"
+          >
+            <el-option value="https://api.anthropic.com" label="Anthropic — https://api.anthropic.com" />
+            <el-option value="https://open.bigmodel.cn/api/anthropic" label="智谱 — https://open.bigmodel.cn/api/anthropic" />
+            <el-option value="https://api.b.ai" label="波场 — https://api.b.ai" />
+          </el-select>
         </el-form-item>
 
         <el-form-item label="API Key" prop="api_key">
@@ -26,10 +37,18 @@
         </el-form-item>
 
         <el-form-item label="Model" prop="model">
-          <el-select v-model="form.model" style="width: 100%">
+          <el-select
+            v-model="form.model"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="选择或输入 model 名称"
+          >
             <el-option value="claude-sonnet-4-6" label="Claude Sonnet 4.6" />
             <el-option value="claude-opus-4-7" label="Claude Opus 4.7" />
             <el-option value="claude-haiku-4-5-20251001" label="Claude Haiku 4.5" />
+            <el-option value="claude-opus-4-5-20251001" label="Claude Opus [1M]" />
           </el-select>
         </el-form-item>
 
