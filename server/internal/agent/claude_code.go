@@ -37,8 +37,9 @@ func (p *ClaudeCodeProcessor) OnActivate(config *model.TokenConfig) error {
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	log.Printf("[AGENT] ClaudeCode updating settings: %s", settingsPath)
 	if err := p.updateSettings(settingsPath, map[string]string{
-		"ANTHROPIC_BASE_URL": "http://127.0.0.1:12121/claude_code",
-		"ANTHROPIC_API_KEY":  "placeholder",
+		"ANTHROPIC_BASE_URL":   "http://127.0.0.1:12121/claude_code",
+		"ANTHROPIC_API_KEY":    "placeholder",
+		"ANTHROPIC_AUTH_TOKEN": config.APIKey,
 	}); err != nil {
 		log.Printf("[AGENT] ClaudeCode OnActivate error: %v", err)
 		return err
