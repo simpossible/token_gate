@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: Prepare embedded assets
+        run: |
+          mkdir -p server/internal/web/dist
+          cp -r web/dist/ server/internal/web/dist/
+
+      - name: Build binaries
+        run: |
+          cd server
+          VERSION=${GITHUB_REF_NAME}
+          GOOS=darwin GOARCH=arm64  go build -ldflags "-X main.version=${VERSION}" -o token_gate_darwin_arm64  .
+          GOOS=darwin GOARCH=amd64  go build -ldflags "-X main.version=${VERSION}" -o token_gate_darwin_amd64  .
+          tar czf token_gate_darwin_arm64.tar.gz  token_gate_darwin_arm64
+          tar czf token_gate_darwin_amd64.tar.gz  token_gate_darwin_amd64
+          shasum -a 256 token_gate_darwin_arm64.tar.gz token_gate_darwin_amd64.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            server/token_gate_darwin_arm64.tar.gz
+            server/token_gate_darwin_amd64.tar.gz
+            server/checksums.txt
+          generate_release_notes: true

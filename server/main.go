@@ -2,11 +2,20 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 
+	"gopkg.in/natefinch/lumberjack.v2"
 	"token_gate/internal/agent"
 	"token_gate/internal/api"
 	"token_gate/internal/config"
@@ -15,29 +24,240 @@ import (
 	"token_gate/internal/web"
 )
 
-func main() {
-	log.Println("=== Token Gate Starting ===")
+const webURL = "http://127.0.0.1:12123"
 
+func main() {
+	cmd := "start"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+
+	switch cmd {
+	case "start":
+		cmdStart()
+	case "stop":
+		cmdStop()
+	case "show":
+		cmdShow()
+	case "status":
+		cmdStatus()
+	case "server":
+		// foreground mode for brew services / launchd
+		runForeground()
+	case "--daemon":
+		// internal: called by cmdStart, runs in background
+		runDaemon()
+	default:
+		fmt.Fprintf(os.Stderr, "Usage: token_gate [start|stop|show|status]\n")
+		os.Exit(1)
+	}
+}
+
+// --- path helpers ---
+
+func dataDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".token_gate")
+}
+
+func pidPath() string { return filepath.Join(dataDir(), "token_gate.pid") }
+func logPath() string { return filepath.Join(dataDir(), "logs", "token_gate.log") }
+
+// --- process helpers ---
+
+func readPID() (int, bool) {
+	data, err := os.ReadFile(pidPath())
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return 0, false
+	}
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		return 0, false
+	}
+	return pid, true
+}
+
+func portListening() bool {
+	resp, err := http.Get(webURL)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return true
+}
+
+// --- commands ---
+
+func cmdStart() {
+	if pid, ok := readPID(); ok {
+		fmt.Printf("Token Gate is already running (pid %d)\n", pid)
+		openBrowser(webURL)
+		return
+	}
+	if portListening() {
+		fmt.Println("Token Gate is already running (managed by brew services)")
+		openBrowser(webURL)
+		return
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	cmd := exec.Command(exe, "--daemon")
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Print("Starting Token Gate")
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		fmt.Print(".")
+		if portListening() {
+			fmt.Println(" ready!")
+			break
+		}
+	}
+	if !portListening() {
+		fmt.Printf("\nTimed out. Check logs: %s\n", logPath())
+		os.Exit(1)
+	}
+
+	openBrowser(webURL)
+	fmt.Printf("Web: %s\n", webURL)
+	fmt.Printf("Logs: %s\n", logPath())
+}
+
+func cmdStop() {
+	pid, ok := readPID()
+	if !ok {
+		if portListening() {
+			fmt.Println("Token Gate is running (managed by brew services).")
+			fmt.Println("Use: brew services stop token_gate")
+		} else {
+			fmt.Println("Token Gate is not running")
+		}
+		return
+	}
+
+	proc, _ := os.FindProcess(pid)
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		fmt.Fprintf(os.Stderr, "error stopping process: %v\n", err)
+		os.Exit(1)
+	}
+	os.Remove(pidPath())
+	fmt.Printf("Token Gate stopped (pid %d)\n", pid)
+}
+
+func cmdShow() {
+	if portListening() {
+		openBrowser(webURL)
+		return
+	}
+	fmt.Println("Token Gate is not running, starting...")
+	cmdStart()
+}
+
+func cmdStatus() {
+	if pid, ok := readPID(); ok {
+		fmt.Printf("running (pid %d)\n", pid)
+		fmt.Printf("Web:  %s\n", webURL)
+		fmt.Printf("Logs: %s\n", logPath())
+		return
+	}
+	if portListening() {
+		fmt.Println("running (managed by brew services)")
+		fmt.Printf("Web: %s\n", webURL)
+		return
+	}
+	fmt.Println("stopped")
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	default:
+		return
+	}
+	_ = cmd.Start()
+}
+
+// --- server startup ---
+
+func setupLogger(alsoStdout bool) {
+	lp := logPath()
+	if err := os.MkdirAll(filepath.Dir(lp), 0755); err != nil {
+		log.Fatalf("create log dir: %v", err)
+	}
+	lj := &lumberjack.Logger{
+		Filename:   lp,
+		MaxSize:    10, // MB
+		MaxBackups: 3,
+	}
+	if alsoStdout {
+		log.SetOutput(io.MultiWriter(os.Stdout, lj))
+	} else {
+		log.SetOutput(lj)
+	}
+}
+
+func runForeground() {
+	setupLogger(true)
+	log.Println("=== Token Gate Starting (foreground) ===")
+	startServers()
+}
+
+func runDaemon() {
+	// ensure data dir exists before writing PID
+	if err := os.MkdirAll(dataDir(), 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "create data dir: %v\n", err)
+		os.Exit(1)
+	}
+	setupLogger(false)
+
+	pp := pidPath()
+	if err := os.WriteFile(pp, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
+		log.Fatalf("write pid file: %v", err)
+	}
+	defer os.Remove(pp)
+
+	log.Println("=== Token Gate Starting (daemon) ===")
+	startServers()
+}
+
+func startServers() {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("get home dir: %v", err)
 	}
 
-	dataDir := filepath.Join(home, ".token_gate")
-	webDir := filepath.Join(dataDir, "web")
-	dbPath := filepath.Join(dataDir, "token_gate.db")
+	dir := filepath.Join(home, ".token_gate")
+	webDir := filepath.Join(dir, "web")
+	dbPath := filepath.Join(dir, "token_gate.db")
 
-	log.Printf("[MAIN] Data directory: %s", dataDir)
-	log.Printf("[MAIN] Database path: %s", dbPath)
-
-	// 1. Create data directory
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Fatalf("create data dir: %v", err)
 	}
-	log.Println("[MAIN] Data directory ready")
 
-	// 2. Initialize database
-	log.Println("[MAIN] Opening database...")
 	db, err := database.Open(dbPath)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
@@ -48,62 +268,48 @@ func main() {
 		log.Fatalf("init schema: %v", err)
 	}
 
-	// 3. Extract web resources
 	if err := os.MkdirAll(webDir, 0755); err != nil {
 		log.Fatalf("create web dir: %v", err)
 	}
-	log.Println("[MAIN] Extracting web files...")
 	if err := web.ExtractWebFiles(webDir); err != nil {
-		log.Printf("[MAIN] warning: extract web files: %v", err)
-	} else {
-		log.Println("[MAIN] Web files extracted")
+		log.Printf("warning: extract web files: %v", err)
 	}
 
-	// 4. Register agent processors
 	processors := []agent.AgentProcessor{
 		agent.NewClaudeCodeProcessor(),
 	}
-	log.Printf("[MAIN] Registered %d agent processors", len(processors))
 
-	// 5. Load memory cache
-	log.Println("[MAIN] Loading active config cache...")
 	cache := config.NewCache(db)
 	if err := cache.Load(); err != nil {
 		log.Fatalf("load cache: %v", err)
 	}
 
-	// 6. Scan existing config on first run
 	isEmpty, err := db.IsEmpty()
 	if err != nil {
 		log.Fatalf("check db: %v", err)
 	}
 	if isEmpty {
-		log.Println("[MAIN] Database is empty, importing existing Claude Code config...")
 		importExistingConfig(db, cache, processors)
-	} else {
-		log.Println("[MAIN] Database already populated, skipping auto-import")
 	}
 
-	// 7. Start servers
-	log.Println("=== Starting Servers ===")
 	proxyHandler := proxy.NewProxy(cache, db)
 	apiHandler := api.NewAPI(db, cache, processors)
 
 	go func() {
-		log.Println("[SERVER] API Proxy starting on http://127.0.0.1:12121")
+		log.Println("[SERVER] API Proxy on http://127.0.0.1:12121")
 		if err := http.ListenAndServe("127.0.0.1:12121", proxyHandler); err != nil {
 			log.Fatalf("proxy server: %v", err)
 		}
 	}()
 
 	go func() {
-		log.Println("[SERVER] Config API starting on http://127.0.0.1:12122")
+		log.Println("[SERVER] Config API on http://127.0.0.1:12122")
 		if err := http.ListenAndServe("127.0.0.1:12122", apiHandler.Routes()); err != nil {
 			log.Fatalf("api server: %v", err)
 		}
 	}()
 
-	log.Println("[SERVER] Web GUI starting on http://127.0.0.1:12123")
+	log.Println("[SERVER] Web GUI on http://127.0.0.1:12123")
 	log.Println("=== Token Gate Ready ===")
 	if err := http.ListenAndServe("127.0.0.1:12123", web.Handler()); err != nil {
 		log.Fatalf("web server: %v", err)
@@ -133,7 +339,6 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 		return
 	}
 
-	// ANTHROPIC_AUTH_TOKEN takes priority; skip "placeholder" written by token_gate itself
 	apiKey := ""
 	if v, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok && v != "" && v != "placeholder" {
 		apiKey = v
@@ -150,7 +355,6 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 		return
 	}
 
-	// Skip base URL if it's already the token_gate proxy (set by a previous OnActivate)
 	baseURL := "https://api.anthropic.com"
 	if v, ok := env["ANTHROPIC_BASE_URL"].(string); ok && v != "" && v != "http://127.0.0.1:12121/claude_code" {
 		baseURL = v
@@ -167,10 +371,8 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 		return
 	}
 
-	// Reload cache after import
 	cache.Load()
 
-	// Trigger OnActivate for claude_code
 	for _, p := range processors {
 		if p.GetType() == "claude_code" {
 			vc, _ := db.GetActiveConfig("claude_code")
