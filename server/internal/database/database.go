@@ -338,8 +338,8 @@ func (db *DB) GetUsage(tokenID string) (*model.UsageResponse, error) {
 	}
 
 	dailyRows, err := db.Query(
-		`SELECT DATE(created_at) as date, agent_type, SUM(input_tokens), SUM(output_tokens), COUNT(*)
-		 FROM usage WHERE token_id = ? GROUP BY DATE(created_at), agent_type ORDER BY date DESC`,
+		`SELECT COALESCE(DATE(created_at), ''), agent_type, SUM(input_tokens), SUM(output_tokens), COUNT(*)
+		 FROM usage WHERE token_id = ? GROUP BY DATE(created_at), agent_type ORDER BY DATE(created_at) DESC`,
 		tokenID,
 	)
 	if err != nil {
