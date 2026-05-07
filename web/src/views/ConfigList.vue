@@ -63,9 +63,12 @@ function agentLabel(agent) {
 
 <style scoped>
 .config-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: flex-start;
   gap: 16px;
+  width: 100%;
 }
 .config-card {
   background: white;
@@ -74,6 +77,7 @@ function agentLabel(agent) {
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.15s;
   border: 1px solid #ebeef5;
+  width: 300px;
 }
 .config-card:hover {
   box-shadow: 0 4px 16px rgba(0,0,0,0.1);
@@ -84,14 +88,14 @@ function agentLabel(agent) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 160px;
+  min-height: 120px;
   border: 2px dashed #dcdfe6;
   background: transparent;
 }
 .add-text { margin-top: 8px; color: #909399; font-size: 14px; }
 .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
 .card-name { font-size: 16px; font-weight: 600; color: #303133; margin: 0; }
-.card-tags { display: flex; gap: 4px; }
+.card-tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .info-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 13px; }
 .info-label { color: #909399; min-width: 48px; }
 .info-value { color: #606266; word-break: break-all; }

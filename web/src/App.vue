@@ -110,5 +110,5 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   font-weight: 600;
   cursor: pointer;
 }
-.el-main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+.el-main { padding: 24px; }
 </style>
