@@ -6,6 +6,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Token Gate is a local proxy gateway that manages multiple Claude API keys for AI coding tools (Claude Code, Cursor, etc.). It intercepts requests, injects the active API key and model, records token usage, and exposes a web GUI for management. The final artifact is a single Go binary with the Vue frontend embedded.
 
+## Release Process
+
+Releasing a new version is a single command:
+
+```bash
+# Prerequisite (one-time): authenticate GitHub CLI
+gh auth login -h github.com
+
+# Release (run from project root)
+./scripts/release.sh v0.1.2
+```
+
+The script does everything in order:
+1. Cross-compiles for `darwin/arm64` and `darwin/amd64`
+2. Packages into `.tar.gz` files in `server/`
+3. Tags the commit and pushes tag + master to GitHub
+4. Creates a GitHub Release and uploads both tarballs
+5. Clones `simpossible/homebrew-tap`, regenerates the formula with updated version and SHA256s, and pushes
+
+**Common pitfalls:**
+- `gh auth login` must be done before running the script — `git push` works via SSH but creating a GitHub Release requires the `gh` OAuth token.
+- Run the script from the **project root** (where `server/` and `web/` live), not from inside `server/`.
+- The formula in `homebrew/token_gate.rb` is not the one Homebrew uses — it's a reference copy. The live formula is in the `homebrew-tap` repo (`git@github.com:simpossible/homebrew-tap.git`), updated automatically by the script.
+- After release, users install with:
+  ```bash
+  brew tap simpossible/tap
+  brew install token_gate
+  ```
+
 ## Build Commands
 
 ```bash
