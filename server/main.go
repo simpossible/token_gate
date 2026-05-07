@@ -44,11 +44,16 @@ func main() {
 	case "server":
 		// foreground mode for brew services / launchd
 		runForeground()
+	case "debug":
+		// debug mode: run in foreground with stdout logging
+		setupLogger(true)
+		log.Println("=== Token Gate Starting (debug mode) ===")
+		startServers()
 	case "--daemon":
 		// internal: called by cmdStart, runs in background
 		runDaemon()
 	default:
-		fmt.Fprintf(os.Stderr, "Usage: token_gate [start|stop|show|status]\n")
+		fmt.Fprintf(os.Stderr, "Usage: token_gate [start|stop|show|status|debug]\n")
 		os.Exit(1)
 	}
 }
@@ -364,6 +369,13 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 	}
 
 	modelStr := "claude-sonnet-4-6"
+	if v, ok := env["ANTHROPIC_MODEL"].(string); ok && v != "" {
+		modelStr = v
+		log.Printf("[MAIN] Found custom model in env: %s", modelStr)
+	} else if v, ok := settings["model"].(string); ok && v != "" {
+		modelStr = v
+		log.Printf("[MAIN] Found model in settings: %s", modelStr)
+	}
 
 	log.Printf("[MAIN] Importing config: name=default, url=%s, model=%s", baseURL, modelStr)
 	if err := db.ImportExistingConfig("default", baseURL, apiKey, modelStr); err != nil {
