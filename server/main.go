@@ -355,7 +355,7 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 		return
 	}
 
-	baseURL := "https://api.anthropic.com"
+	baseURL := "https://open.bigmodel.cn/api/anthropic"
 	if v, ok := env["ANTHROPIC_BASE_URL"].(string); ok && v != "" && v != "http://127.0.0.1:12121/claude_code" {
 		baseURL = v
 		log.Printf("[MAIN] Found custom base URL: %s", baseURL)
