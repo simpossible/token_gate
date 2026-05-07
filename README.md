@@ -1,6 +1,9 @@
 # Token Gate
 
-本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 API Key 管理、一键切换和用量可视化。
+本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 
+* API Key 管理、
+* 一键切换
+* ### 用量可视化，可以看到实际的token消耗量
 
 
 
