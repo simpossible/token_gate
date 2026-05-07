@@ -7,11 +7,11 @@ class TokenGate < Formula
   on_macos do
     on_arm do
       url "https://github.com/simpossible/token_gate/releases/download/v#{version}/token_gate_darwin_arm64.tar.gz"
-      sha256 "REPLACE_WITH_ARM64_SHA256"
+      sha256 "5c4b4dce70c6f7f2749b0110487a0f3182f00cc6e5ea69515c443e63530ba4c3"
     end
     on_intel do
       url "https://github.com/simpossible/token_gate/releases/download/v#{version}/token_gate_darwin_amd64.tar.gz"
-      sha256 "REPLACE_WITH_AMD64_SHA256"
+      sha256 "8b03b58cca324978031d3288e3133599bf5253d18a9c4a55b955ea2dce0a6b28"
     end
   end
 

@@ -13,42 +13,26 @@
         </el-form-item>
 
         <el-form-item label="API URL" prop="url">
-          <el-select
-            v-model="form.url"
-            filterable
-            allow-create
-            default-first-option
-            style="width: 100%"
-            placeholder="https://api.anthropic.com"
-          >
+          <el-select v-model="form.url" filterable allow-create default-first-option style="width: 100%"
+            placeholder="https://api.anthropic.com">
             <el-option value="https://api.anthropic.com" label="Anthropic — https://api.anthropic.com" />
-            <el-option value="https://open.bigmodel.cn/api/anthropic" label="智谱 — https://open.bigmodel.cn/api/anthropic" />
+            <el-option value="https://open.bigmodel.cn/api/anthropic"
+              label="智谱 — https://open.bigmodel.cn/api/anthropic" />
             <el-option value="https://api.b.ai" label="波场 — https://api.b.ai" />
           </el-select>
         </el-form-item>
 
         <el-form-item label="API Key" prop="api_key">
-          <el-input
-            v-model="form.api_key"
-            type="password"
-            placeholder="sk-ant-..."
-            show-password
-          />
+          <el-input v-model="form.api_key" type="password" placeholder="sk-ant-..." show-password />
         </el-form-item>
 
         <el-form-item label="Model" prop="model">
-          <el-select
-            v-model="form.model"
-            filterable
-            allow-create
-            default-first-option
-            style="width: 100%"
-            placeholder="选择或输入 model 名称"
-          >
+          <el-select v-model="form.model" filterable allow-create default-first-option style="width: 100%"
+            placeholder="选择或输入 model 名称">
             <el-option value="claude-sonnet-4-6" label="Claude Sonnet 4.6" />
             <el-option value="claude-opus-4-7" label="Claude Opus 4.7" />
             <el-option value="claude-haiku-4-5-20251001" label="Claude Haiku 4.5" />
-            <el-option value="claude-opus-4-5-20251001" label="Claude Opus [1M]" />
+            <el-option value="opus[1m]" label="Claude Opus [1M]" />
           </el-select>
         </el-form-item>
 
@@ -124,8 +108,20 @@ onMounted(loadConfig)
 </script>
 
 <style scoped>
-.form-container { padding: 20px 0; }
-.page-header { margin-bottom: 24px; }
-.header-title { font-size: 18px; font-weight: 500; }
-.form-card { max-width: 600px; }
+.form-container {
+  padding: 20px 0;
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.header-title {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.form-card {
+  max-width: 600px;
+}
 </style>
