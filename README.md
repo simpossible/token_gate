@@ -1,4 +1,4 @@
-# Token Gate
+<img width="2758" height="1460" alt="image" src="https://github.com/user-attachments/assets/d5fa3b12-5625-470d-90b5-b69a19fac672" /><img width="2792" height="1368" alt="image" src="https://github.com/user-attachments/assets/c8e19a6a-9152-450b-b0f6-f0275574d4d6" /># Token Gate
 
 本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 API Key 管理、一键切换和用量可视化。
 
@@ -68,6 +68,7 @@ brew services start token_gate
 2. 填写配置名称、API 地址、API Key 和模型
 3. API 地址支持预设选择（Anthropic 官方、智谱 AI 等），也可输入自定义地址
 4. 保存后配置出现在列表中
+<img width="1934" height="660" alt="image" src="https://github.com/user-attachments/assets/3e4e1b01-6d95-44d2-bc1e-50c6de8a5544" />
 
 ### 切换配置
 
@@ -81,6 +82,7 @@ brew services start token_gate
 - **趋势图表** — 以柱状图展示每日 Token 消耗趋势，可按输入/输出 Token 分别查看
 
 用量数据由代理自动从 SSE 响应中解析，无需额外配置。
+<img width="2758" height="1460" alt="image" src="https://github.com/user-attachments/assets/1885563d-a365-4803-907c-3d584ee04bd4" />
 
 ## 工作原理
 
