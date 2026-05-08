@@ -20,6 +20,7 @@ import (
 	"token_gate/internal/api"
 	"token_gate/internal/config"
 	"token_gate/internal/database"
+	"token_gate/internal/latency"
 	"token_gate/internal/proxy"
 	"token_gate/internal/web"
 )
@@ -297,8 +298,20 @@ func startServers() {
 		importExistingConfig(db, cache, processors)
 	}
 
-	proxyHandler := proxy.NewProxy(cache, db)
-	apiHandler := api.NewAPI(db, cache, processors)
+	latencyCache := latency.New()
+
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := db.CleanupOldUsage(30); err != nil {
+				log.Printf("[MAIN] cleanup old usage failed: %v", err)
+			}
+		}
+	}()
+
+	proxyHandler := proxy.NewProxy(cache, db, latencyCache)
+	apiHandler := api.NewAPI(db, cache, processors, latencyCache)
 
 	go func() {
 		log.Println("[SERVER] API Proxy on http://127.0.0.1:12121")

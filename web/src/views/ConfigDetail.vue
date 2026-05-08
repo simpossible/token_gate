@@ -73,6 +73,10 @@
         </div>
         <el-empty v-else description="No usage data" />
       </el-card>
+
+      <el-card class="card" header="Request History (Last 7 Days)">
+        <RequestChart :configId="configId" />
+      </el-card>
     </div>
   </div>
 </template>
@@ -82,6 +86,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Monitor } from '@element-plus/icons-vue'
 import { getConfig, deleteConfig, activateConfig, deactivateConfig, getUsage } from '../api/index.js'
+import RequestChart from '../components/RequestChart.vue'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { BarChart } from 'echarts/charts'

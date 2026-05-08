@@ -28,6 +28,10 @@
           <span class="info-label">Model</span>
           <span class="info-value">{{ config.model }}</span>
         </div>
+        <div class="info-row">
+          <span class="info-label">Latency</span>
+          <span class="info-value latency">{{ latencyText(config.id) }}</span>
+        </div>
       </div>
     </div>
 
@@ -39,7 +43,9 @@
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
+import { getLatestLatency } from '../api/index.js'
 
 const props = defineProps({
   configs: { type: Array, default: () => [] },
@@ -47,6 +53,8 @@ const props = defineProps({
 })
 
 defineEmits(['open-detail', 'open-create'])
+
+const latencyMap = ref({})
 
 const agentColors = { claude_code: 'success', cursor: '' }
 
@@ -59,6 +67,24 @@ function agentLabel(agent) {
   return found ? found.label : agent
 }
 
+function latencyText(id) {
+  const entry = latencyMap.value[id]
+  if (!entry || !entry.has_data) return '—'
+  return entry.latest_latency_ms + 'ms'
+}
+
+onMounted(async () => {
+  const results = await Promise.allSettled(
+    props.configs.map(c => getLatestLatency(c.id).then(data => ({ id: c.id, data })))
+  )
+  const map = {}
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      map[r.value.id] = r.value.data
+    }
+  }
+  latencyMap.value = map
+})
 </script>
 
 <style scoped>
@@ -99,4 +125,5 @@ function agentLabel(agent) {
 .info-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 13px; }
 .info-label { color: #909399; min-width: 48px; }
 .info-value { color: #606266; word-break: break-all; }
+.info-value.latency { color: #f56c6c; font-weight: 500; }
 </style>

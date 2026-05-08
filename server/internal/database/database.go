@@ -53,6 +53,7 @@ func (db *DB) InitSchema() error {
 		agent_type TEXT NOT NULL,
 		input_tokens INTEGER NOT NULL DEFAULT 0,
 		output_tokens INTEGER NOT NULL DEFAULT 0,
+		latency_ms INTEGER NOT NULL DEFAULT 0,
 		model TEXT NOT NULL DEFAULT '',
 		request_path TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL
@@ -61,10 +62,12 @@ func (db *DB) InitSchema() error {
 	_, err := db.Exec(schema)
 	if err != nil {
 		log.Printf("[DB] Schema initialization failed: %v", err)
-	} else {
-		log.Printf("[DB] Schema initialized successfully")
+		return err
 	}
-	return err
+	// migrate old databases that lack the latency_ms column
+	db.Exec("ALTER TABLE usage ADD COLUMN latency_ms INTEGER NOT NULL DEFAULT 0")
+	log.Printf("[DB] Schema initialized successfully")
+	return nil
 }
 
 func (db *DB) IsEmpty() (bool, error) {
@@ -289,16 +292,44 @@ func (db *DB) GetActiveAgentsForConfig(tokenID string) ([]string, error) {
 
 // --- Usage ---
 
-func (db *DB) RecordUsage(tokenID, agentType string, inputTokens, outputTokens int, reqModel, requestPath string) error {
-	log.Printf("[DB] Recording usage: token_id=%s, agent=%s, input=%d, output=%d, model=%s, path=%s",
-		tokenID, agentType, inputTokens, outputTokens, reqModel, requestPath)
+func (db *DB) RecordUsage(tokenID, agentType string, latencyMs int64, inputTokens, outputTokens int) error {
+	log.Printf("[DB] Recording usage: token_id=%s, agent=%s, latency=%dms, input=%d, output=%d",
+		tokenID, agentType, latencyMs, inputTokens, outputTokens)
 	_, err := db.Exec(
-		"INSERT INTO usage (id, token_id, agent_type, input_tokens, output_tokens, model, request_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		uuid.New().String(), tokenID, agentType, inputTokens, outputTokens, reqModel, requestPath, time.Now(),
+		"INSERT INTO usage (id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at) VALUES (?, ?, ?, ?, ?, ?, '', '', ?)",
+		uuid.New().String(), tokenID, agentType, inputTokens, outputTokens, latencyMs, time.Now(),
 	)
 	if err != nil {
 		log.Printf("[DB] Record usage failed: %v", err)
 	}
+	return err
+}
+
+func (db *DB) GetUsages(tokenID string, days int) ([]*model.Usage, error) {
+	since := time.Now().AddDate(0, 0, -days)
+	rows, err := db.Query(
+		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at FROM usage WHERE token_id = ? AND created_at >= ? ORDER BY created_at ASC",
+		tokenID, since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var usages []*model.Usage
+	for rows.Next() {
+		u := &model.Usage{}
+		if err := rows.Scan(&u.ID, &u.TokenID, &u.AgentType, &u.InputTokens, &u.OutputTokens, &u.LatencyMs, &u.Model, &u.RequestPath, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		usages = append(usages, u)
+	}
+	return usages, rows.Err()
+}
+
+func (db *DB) CleanupOldUsage(retainDays int) error {
+	cutoff := time.Now().AddDate(0, 0, -retainDays)
+	_, err := db.Exec("DELETE FROM usage WHERE created_at < ?", cutoff)
 	return err
 }
 

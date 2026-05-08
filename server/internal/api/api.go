@@ -4,27 +4,30 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
 	"token_gate/internal/agent"
 	"token_gate/internal/config"
 	"token_gate/internal/database"
+	"token_gate/internal/latency"
 	"token_gate/internal/model"
 )
 
 type API struct {
-	db         *database.DB
-	cache      *config.ActiveConfigCache
-	processors map[string]agent.AgentProcessor
+	db           *database.DB
+	cache        *config.ActiveConfigCache
+	processors   map[string]agent.AgentProcessor
+	latencyCache *latency.Cache
 }
 
-func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) *API {
+func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor, latencyCache *latency.Cache) *API {
 	pm := make(map[string]agent.AgentProcessor)
 	for _, p := range processors {
 		pm[p.GetType()] = p
 	}
-	return &API{db: db, cache: cache, processors: pm}
+	return &API{db: db, cache: cache, processors: pm, latencyCache: latencyCache}
 }
 
 func (a *API) Routes() http.Handler {
@@ -39,6 +42,8 @@ func (a *API) Routes() http.Handler {
 		r.Put("/", a.updateConfig)
 		r.Delete("/", a.deleteConfig)
 		r.Get("/usage", a.getUsage)
+		r.Get("/usages", a.getUsages)
+		r.Get("/latency/latest", a.getLatestLatency)
 		r.Post("/activate", a.activateConfig)
 		r.Post("/deactivate", a.deactivateConfig)
 	})
@@ -294,6 +299,36 @@ func (a *API) deactivateConfig(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[API] config deactivated: config_id=%s, config_name=%s, agent=%s", id, tc.Name, req.AgentType)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deactivated"})
+}
+
+func (a *API) getUsages(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	days := 7
+	if d := r.URL.Query().Get("days"); d != "" {
+		if v, err := strconv.Atoi(d); err == nil && v > 0 {
+			days = v
+		}
+	}
+	usages, err := a.db.GetUsages(id, days)
+	if err != nil {
+		log.Printf("[API] get usages failed: id=%s, error=%v", id, err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if usages == nil {
+		usages = []*model.Usage{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"usages": usages})
+}
+
+func (a *API) getLatestLatency(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ms, ok := a.latencyCache.Get(id)
+	writeJSON(w, http.StatusOK, model.LatestLatencyResponse{
+		TokenID:         id,
+		LatestLatencyMs: ms,
+		HasData:         ok,
+	})
 }
 
 func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {

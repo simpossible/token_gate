@@ -33,9 +33,16 @@ type Usage struct {
 	AgentType    string    `json:"agent_type"`
 	InputTokens  int       `json:"input_tokens"`
 	OutputTokens int       `json:"output_tokens"`
+	LatencyMs    int64     `json:"latency_ms"`
 	Model        string    `json:"model"`
 	RequestPath  string    `json:"request_path"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+type LatestLatencyResponse struct {
+	TokenID         string `json:"token_id"`
+	LatestLatencyMs int64  `json:"latest_latency_ms"`
+	HasData         bool   `json:"has_data"`
 }
 
 type ConfigWithAgents struct {

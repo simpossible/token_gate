@@ -39,3 +39,11 @@ export function deactivateConfig(id, agentType) {
 export function getAgents() {
   return api.get('/api/agents').then(r => r.data.agents)
 }
+
+export function getUsages(id, days = 7) {
+  return api.get(`/api/configs/${id}/usages?days=${days}`).then(r => r.data.usages)
+}
+
+export function getLatestLatency(id) {
+  return api.get(`/api/configs/${id}/latency/latest`).then(r => r.data)
+}

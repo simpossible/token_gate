@@ -13,15 +13,17 @@ import (
 
 	"token_gate/internal/config"
 	"token_gate/internal/database"
+	"token_gate/internal/latency"
 )
 
 type Proxy struct {
-	cache *config.ActiveConfigCache
-	db    *database.DB
+	cache        *config.ActiveConfigCache
+	db           *database.DB
+	latencyCache *latency.Cache
 }
 
-func NewProxy(cache *config.ActiveConfigCache, db *database.DB) *Proxy {
-	return &Proxy{cache: cache, db: db}
+func NewProxy(cache *config.ActiveConfigCache, db *database.DB, latencyCache *latency.Cache) *Proxy {
+	return &Proxy{cache: cache, db: db, latencyCache: latencyCache}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -128,31 +130,39 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if isSSE {
 		log.Printf("[PROXY] streaming SSE response")
-		p.streamSSE(w, resp, tc.ID, agentType, realPath, start)
+		p.streamSSE(w, resp, tc.ID, agentType, start)
 	} else {
-		// Non-streaming: capture body for usage extraction, then write
 		body, _ := io.ReadAll(resp.Body)
 		w.Write(body)
-		log.Printf("[PROXY] request complete: agent=%s, path=%s, duration=%v, status=%d", agentType, realPath, time.Since(start), resp.StatusCode)
-		go p.extractAndRecordUsage(body, tc.ID, agentType, realPath)
+		latencyMs := time.Since(start).Milliseconds()
+		log.Printf("[PROXY] request complete: agent=%s, path=%s, duration=%dms, status=%d", agentType, realPath, latencyMs, resp.StatusCode)
+		go p.recordUsage(body, tc.ID, agentType, latencyMs)
 	}
 }
 
-func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, agentType, requestPath string, start time.Time) {
+func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, agentType string, start time.Time) {
 	flusher, canFlush := w.(http.Flusher)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var lastUsageInput, lastUsageOutput int
+	var ttfbMs int64
+	firstLine := true
 
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		if firstLine && line != "" {
+			ttfbMs = time.Since(start).Milliseconds()
+			firstLine = false
+		}
+
 		fmt.Fprintln(w, line)
 		if canFlush {
 			flusher.Flush()
 		}
 
-		// Parse usage from message_delta events
+		// Parse usage from SSE events
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
 			if data == "[DONE]" {
@@ -168,7 +178,6 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 						lastUsageOutput = int(ot)
 					}
 				}
-				// Also check message_start for input tokens
 				if msg, ok := event["message"].(map[string]interface{}); ok {
 					if usage, ok := msg["usage"].(map[string]interface{}); ok {
 						if it, ok := usage["input_tokens"].(float64); ok {
@@ -185,17 +194,18 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 
 	if lastUsageInput > 0 || lastUsageOutput > 0 {
 		go func() {
-			log.Printf("[PROXY] recording usage: agent=%s, input=%d, output=%d", agentType, lastUsageInput, lastUsageOutput)
-			if err := p.db.RecordUsage(tokenID, agentType, lastUsageInput, lastUsageOutput, "", requestPath); err != nil {
+			log.Printf("[PROXY] recording SSE usage: agent=%s, latency=%dms, input=%d, output=%d", agentType, ttfbMs, lastUsageInput, lastUsageOutput)
+			if err := p.db.RecordUsage(tokenID, agentType, ttfbMs, lastUsageInput, lastUsageOutput); err != nil {
 				log.Printf("[PROXY] record usage error: %v", err)
 			}
+			p.latencyCache.Set(tokenID, ttfbMs)
 		}()
 	}
 
-	log.Printf("[PROXY] SSE stream complete: agent=%s, path=%s, duration=%v, input_tokens=%d, output_tokens=%d", agentType, requestPath, time.Since(start), lastUsageInput, lastUsageOutput)
+	log.Printf("[PROXY] SSE stream complete: agent=%s, ttfb=%dms, input=%d, output=%d", agentType, ttfbMs, lastUsageInput, lastUsageOutput)
 }
 
-func (p *Proxy) extractAndRecordUsage(body []byte, tokenID, agentType, requestPath string) {
+func (p *Proxy) recordUsage(body []byte, tokenID, agentType string, latencyMs int64) {
 	var resp map[string]interface{}
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return
@@ -215,14 +225,11 @@ func (p *Proxy) extractAndRecordUsage(body []byte, tokenID, agentType, requestPa
 	}
 
 	if inputTokens > 0 || outputTokens > 0 {
-		modelName := ""
-		if m, ok := resp["model"].(string); ok {
-			modelName = m
-		}
-		log.Printf("[PROXY] extracting usage from non-streaming response: agent=%s, input=%d, output=%d, model=%s", agentType, inputTokens, outputTokens, modelName)
-		if err := p.db.RecordUsage(tokenID, agentType, inputTokens, outputTokens, modelName, requestPath); err != nil {
+		log.Printf("[PROXY] recording non-SSE usage: agent=%s, latency=%dms, input=%d, output=%d", agentType, latencyMs, inputTokens, outputTokens)
+		if err := p.db.RecordUsage(tokenID, agentType, latencyMs, inputTokens, outputTokens); err != nil {
 			log.Printf("[PROXY] record usage error: %v", err)
 		}
+		p.latencyCache.Set(tokenID, latencyMs)
 	}
 }
 
