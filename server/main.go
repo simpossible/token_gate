@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -170,7 +171,18 @@ func cmdStop() {
 		os.Exit(1)
 	}
 	os.Remove(pidPath())
-	fmt.Printf("Token Gate stopped (pid %d)\n", pid)
+
+	fmt.Printf("Stopping Token Gate (pid %d)", pid)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			fmt.Println(" stopped")
+			return
+		}
+		fmt.Print(".")
+	}
+	fmt.Printf("\nProcess %d did not exit within timeout\n", pid)
 }
 
 func cmdShow() {
@@ -316,56 +328,44 @@ func startServers() {
 	proxyHandler := proxy.NewProxy(cache, db, latencyCache)
 	apiHandler := api.NewAPI(db, cache, processors, latencyCache)
 
-	// Setup graceful shutdown
-	shutdownChan := make(chan struct{})
-	shutdownDone := make(chan struct{})
+	proxyServer := &http.Server{Addr: "127.0.0.1:12121", Handler: proxyHandler}
+	apiServer := &http.Server{Addr: "127.0.0.1:12122", Handler: apiHandler.Routes()}
+	webServer := &http.Server{Addr: "127.0.0.1:12123", Handler: web.Handler()}
+
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 		<-sigChan
 		log.Println("[MAIN] Shutdown signal received, cleaning up active configs...")
 		cleanupAllConfigs(db, cache, processors)
-		close(shutdownChan)
-		close(shutdownDone)
+		db.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		proxyServer.Shutdown(ctx)
+		apiServer.Shutdown(ctx)
+		webServer.Shutdown(ctx)
+		log.Println("[MAIN] Shutdown complete")
 	}()
 
 	go func() {
 		log.Println("[SERVER] API Proxy on http://127.0.0.1:12121")
-		if err := http.ListenAndServe("127.0.0.1:12121", proxyHandler); err != nil {
-			select {
-			case <-shutdownChan:
-				return
-			default:
-				log.Fatalf("proxy server: %v", err)
-			}
+		if err := proxyServer.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatalf("proxy server: %v", err)
 		}
 	}()
 
 	go func() {
 		log.Println("[SERVER] Config API on http://127.0.0.1:12122")
-		if err := http.ListenAndServe("127.0.0.1:12122", apiHandler.Routes()); err != nil {
-			select {
-			case <-shutdownChan:
-				return
-			default:
-				log.Fatalf("api server: %v", err)
-			}
+		if err := apiServer.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatalf("api server: %v", err)
 		}
 	}()
 
 	log.Println("[SERVER] Web GUI on http://127.0.0.1:12123")
 	log.Println("=== Token Gate Ready ===")
-	if err := http.ListenAndServe("127.0.0.1:12123", web.Handler()); err != nil {
-		select {
-		case <-shutdownChan:
-			return
-		default:
-			log.Fatalf("web server: %v", err)
-		}
+	if err := webServer.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("web server: %v", err)
 	}
-
-	<-shutdownDone
-	log.Println("[MAIN] Shutdown complete")
 }
 
 func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {

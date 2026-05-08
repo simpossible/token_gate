@@ -20,14 +20,16 @@ type Proxy struct {
 	cache        *config.ActiveConfigCache
 	db           *database.DB
 	latencyCache *latency.Cache
+	debug        *debugLogger
 }
 
 func NewProxy(cache *config.ActiveConfigCache, db *database.DB, latencyCache *latency.Cache) *Proxy {
-	return &Proxy{cache: cache, db: db, latencyCache: latencyCache}
+	return &Proxy{cache: cache, db: db, latencyCache: latencyCache, debug: newDebugLogger()}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	reqID := shortID()
 
 	// Extract agent_type from path: /{agent_type}/...
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)
@@ -47,6 +49,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[PROXY] request start: agent=%s, path=%s, method=%s, config=%s", agentType, realPath, r.Method, tc.Name)
+
+	// Snapshot original headers before any modification (for debug log)
+	origHeaders := r.Header.Clone()
 
 	// Read and modify request body
 	var bodyBytes []byte
@@ -107,6 +112,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fwdReq.Header.Set("Content-Type", "application/json")
 	}
 
+	p.debug.logRequest(reqID, agentType, r.Method, targetURL, origHeaders, fwdReq.Header, bodyBytes)
+
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(fwdReq)
 	if err != nil {
@@ -117,6 +124,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	log.Printf("[PROXY] response status: %d, content-type: %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	p.debug.logResponse(reqID, resp.StatusCode, resp.Header)
 
 	// Copy response headers
 	for k, vs := range resp.Header {
@@ -130,17 +138,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if isSSE {
 		log.Printf("[PROXY] streaming SSE response")
-		p.streamSSE(w, resp, tc.ID, agentType, start)
+		p.streamSSE(w, resp, tc.ID, agentType, reqID, start)
 	} else {
 		body, _ := io.ReadAll(resp.Body)
 		w.Write(body)
 		latencyMs := time.Since(start).Milliseconds()
 		log.Printf("[PROXY] request complete: agent=%s, path=%s, duration=%dms, status=%d", agentType, realPath, latencyMs, resp.StatusCode)
+		p.debug.logResponseBody(reqID, body)
 		go p.recordUsage(body, tc.ID, agentType, latencyMs)
 	}
 }
 
-func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, agentType string, start time.Time) {
+func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, agentType, reqID string, start time.Time) {
 	flusher, canFlush := w.(http.Flusher)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -161,6 +170,7 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 		if canFlush {
 			flusher.Flush()
 		}
+		p.debug.logSSELine(line)
 
 		// Parse usage from SSE events
 		if strings.HasPrefix(line, "data: ") {
@@ -203,6 +213,7 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 	}
 
 	log.Printf("[PROXY] SSE stream complete: agent=%s, ttfb=%dms, input=%d, output=%d", agentType, ttfbMs, lastUsageInput, lastUsageOutput)
+	p.debug.logSSEEnd(reqID)
 }
 
 func (p *Proxy) recordUsage(body []byte, tokenID, agentType string, latencyMs int64) {
