@@ -147,13 +147,16 @@ async function loadUsageDelta() {
   if (!lastRefreshTime) return
 
   try {
+    console.log('[ConfigDetail] Loading usage delta, lastRefreshTime:', lastRefreshTime)
     const deltaUsages = await getUsageDelta(props.configId, lastRefreshTime)
+    console.log('[ConfigDetail] Delta usages received:', deltaUsages?.length || 0)
     if (!deltaUsages || deltaUsages.length === 0) {
       return
     }
 
     // Update last refresh time to now
     lastRefreshTime = new Date().toISOString()
+    console.log('[ConfigDetail] Updated lastRefreshTime to:', lastRefreshTime)
 
     // Merge delta usages into usageData
     if (usageData.value) {

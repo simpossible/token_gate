@@ -334,10 +334,12 @@ func (a *API) getUsageDelta(w http.ResponseWriter, r *http.Request) {
 
 	after, err := time.Parse(time.RFC3339, afterStr)
 	if err != nil {
-		log.Printf("[API] get usage delta failed: invalid 'after' parameter: %v", err)
+		log.Printf("[API] get usage delta failed: invalid 'after' parameter: %s, error: %v", afterStr, err)
 		writeError(w, http.StatusBadRequest, "invalid 'after' parameter format")
 		return
 	}
+
+	log.Printf("[API] get usage delta: id=%s, after=%s (parsed: %v)", id, afterStr, after)
 
 	usages, err := a.db.GetUsagesAfter(id, after)
 	if err != nil {
@@ -348,6 +350,8 @@ func (a *API) getUsageDelta(w http.ResponseWriter, r *http.Request) {
 	if usages == nil {
 		usages = []*model.Usage{}
 	}
+
+	log.Printf("[API] get usage delta success: id=%s, count=%d", id, len(usages))
 	writeJSON(w, http.StatusOK, map[string]interface{}{"usages": usages})
 }
 

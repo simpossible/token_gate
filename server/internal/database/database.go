@@ -328,9 +328,11 @@ func (db *DB) GetUsages(tokenID string, days int) ([]*model.Usage, error) {
 }
 
 func (db *DB) GetUsagesAfter(tokenID string, after time.Time) ([]*model.Usage, error) {
+	// Convert to local timezone for comparison to match database storage
+	afterLocal := after.Local()
 	rows, err := db.Query(
-		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at FROM usage WHERE token_id = ? AND created_at > ? ORDER BY created_at ASC",
-		tokenID, after,
+		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at FROM usage WHERE token_id = ? AND datetime(created_at) > datetime(?) ORDER BY created_at ASC",
+		tokenID, afterLocal.Format("2006-01-02 15:04:05.000000"),
 	)
 	if err != nil {
 		return nil, err
