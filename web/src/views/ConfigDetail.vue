@@ -75,7 +75,7 @@
       </el-card>
 
       <el-card class="card" header="Request History (Last 7 Days)">
-        <RequestChart :configId="configId" />
+        <RequestChart ref="requestChartRef" :configId="configId" />
       </el-card>
     </div>
   </div>
@@ -102,6 +102,7 @@ const config = ref(null)
 const activeAgentTab = ref('')
 const usageData = ref(null)
 const chartRef = ref(null)
+const requestChartRef = ref(null)
 let chartInstance = null
 let refreshTimer = null
 let lastRefreshTime = null
@@ -195,6 +196,9 @@ async function loadUsageDelta() {
       // Re-render chart without animation
       await nextTick()
       renderChart(false)
+
+      // Push new items to RequestChart
+      requestChartRef.value?.addUsages(deltaUsages)
     }
   } catch (e) {
     console.error('Failed to load usage delta:', e)

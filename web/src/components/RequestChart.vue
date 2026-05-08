@@ -23,7 +23,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, defineExpose } from 'vue'
 import { getUsages } from '../api/index.js'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -102,6 +102,15 @@ onMounted(async () => {
   await nextTick()
   renderCharts()
 })
+
+async function addUsages(items) {
+  if (!items || items.length === 0) return
+  usages.value = [...usages.value, ...items]
+  await nextTick()
+  renderCharts()
+}
+
+defineExpose({ addUsages })
 
 onUnmounted(() => {
   latencyChart?.dispose()
