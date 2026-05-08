@@ -23,7 +23,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { getUsages } from '../api/index.js'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -98,6 +98,8 @@ onMounted(async () => {
   } catch (_) {
     usages.value = []
   }
+  // Wait for DOM to update before rendering charts
+  await nextTick()
   renderCharts()
 })
 
@@ -113,5 +115,5 @@ onUnmounted(() => {
 .stat-label { font-size: 12px; color: #909399; margin-bottom: 4px; }
 .stat-value { font-size: 20px; font-weight: 600; color: #303133; }
 .stat-value.latency { color: #f56c6c; }
-.chart { height: 240px; margin-top: 16px; }
+.chart { height: 240px; width: 100%; margin-top: 16px; }
 </style>
