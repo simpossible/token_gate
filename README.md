@@ -1,4 +1,4 @@
-# Token Gate
+<img width="1386" height="541" alt="image" src="https://github.com/user-attachments/assets/de5d1e94-37ab-4fe4-9d6b-19697c6fdb57" /># Token Gate
 
 本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 
 * API Key 管理、
@@ -69,7 +69,8 @@ brew services start token_gate
 用量数据由代理自动从 SSE 响应中解析，无需额外配置。
 <img width="2758" height="1460" alt="image" src="https://github.com/user-attachments/assets/1885563d-a365-4803-907c-3d584ee04bd4" />
 
-![Uploading image.png…]()
+<img width="1390" height="530" alt="截屏2026-05-08 15 16 50" src="https://github.com/user-attachments/assets/2dcf0f77-1a82-4c4b-af36-28acda138009" />
+
 
 ## 工作原理
 
