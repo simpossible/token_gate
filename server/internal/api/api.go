@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"token_gate/internal/agent"
+	"token_gate/internal/company"
 	"token_gate/internal/config"
 	"token_gate/internal/database"
 	"token_gate/internal/latency"
@@ -20,14 +21,15 @@ type API struct {
 	cache        *config.ActiveConfigCache
 	processors   map[string]agent.AgentProcessor
 	latencyCache *latency.Cache
+	companyMgr   *company.Manager
 }
 
-func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor, latencyCache *latency.Cache) *API {
+func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor, latencyCache *latency.Cache, companyMgr *company.Manager) *API {
 	pm := make(map[string]agent.AgentProcessor)
 	for _, p := range processors {
 		pm[p.GetType()] = p
 	}
-	return &API{db: db, cache: cache, processors: pm, latencyCache: latencyCache}
+	return &API{db: db, cache: cache, processors: pm, latencyCache: latencyCache, companyMgr: companyMgr}
 }
 
 func (a *API) Routes() http.Handler {
@@ -37,6 +39,7 @@ func (a *API) Routes() http.Handler {
 	r.Post("/api/configs", a.createConfig)
 	r.Get("/api/configs", a.listConfigs)
 	r.Get("/api/agents", a.listAgents)
+	r.Get("/api/companies", a.getCompanies)
 	r.Route("/api/configs/{id}", func(r chi.Router) {
 		r.Get("/", a.getConfig)
 		r.Put("/", a.updateConfig)
@@ -382,4 +385,9 @@ func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
 		agents = append(agents, info)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"agents": agents})
+}
+
+func (a *API) getCompanies(w http.ResponseWriter, r *http.Request) {
+	a.companyMgr.RefreshAsync()
+	writeJSON(w, http.StatusOK, a.companyMgr.Get())
 }

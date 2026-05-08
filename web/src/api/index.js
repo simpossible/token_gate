@@ -51,3 +51,7 @@ export function getUsageDelta(id, after) {
 export function getLatestLatency(id) {
   return api.get(`/api/configs/${id}/latency/latest`).then(r => r.data)
 }
+
+export function getCompanies() {
+  return api.get('/api/companies').then(r => r.data)
+}

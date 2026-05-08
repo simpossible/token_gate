@@ -12,13 +12,22 @@
           <el-input v-model="form.name" placeholder="Config display name" />
         </el-form-item>
 
-        <el-form-item label="API URL" prop="url">
-          <el-select v-model="form.url" filterable allow-create default-first-option style="width: 100%"
-            placeholder="https://api.anthropic.com">
-            <el-option value="https://api.anthropic.com" label="Anthropic — https://api.anthropic.com" />
-            <el-option value="https://open.bigmodel.cn/api/anthropic"
-              label="智谱 — https://open.bigmodel.cn/api/anthropic" />
-            <el-option value="https://api.b.ai" label="波场 — https://api.b.ai" />
+        <el-form-item label="厂商 / URL" prop="url">
+          <el-select
+            v-model="form.url"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="选择厂商或直接输入 API URL"
+            @change="onUrlChange"
+          >
+            <el-option
+              v-for="c in companies"
+              :key="c.url"
+              :value="c.url"
+              :label="`${c.name} — ${c.url}`"
+            />
           </el-select>
         </el-form-item>
 
@@ -27,12 +36,20 @@
         </el-form-item>
 
         <el-form-item label="Model" prop="model">
-          <el-select v-model="form.model" filterable allow-create default-first-option style="width: 100%"
-            placeholder="选择或输入 model 名称">
-            <el-option value="claude-sonnet-4-6" label="claude-sonnet-4-6" />
-            <el-option value="claude-opus-4-7" label="claude-opus-4-7" />
-            <el-option value="claude-haiku-4-5-20251001" label="claude-haiku-4-5-20251001" />
-            <el-option value="opus[1m]" label="opus[1m]" />
+          <el-select
+            v-model="form.model"
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="选择或输入 model 名称"
+          >
+            <el-option
+              v-for="m in currentModels"
+              :key="m"
+              :value="m"
+              :label="m"
+            />
           </el-select>
         </el-form-item>
 
@@ -46,9 +63,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createConfig, updateConfig, getConfig } from '../api/index.js'
+import { createConfig, updateConfig, getConfig, getCompanies } from '../api/index.js'
 
 const props = defineProps({
   configId: String,
@@ -58,6 +75,7 @@ const emit = defineEmits(['back', 'saved'])
 
 const formRef = ref(null)
 const submitting = ref(false)
+const companies = ref([])
 const form = ref({
   name: '',
   url: 'https://api.anthropic.com',
@@ -71,13 +89,36 @@ const rules = {
   model: [{ required: true, message: 'Model is required', trigger: 'change' }]
 }
 
+const currentModels = computed(() => {
+  const found = companies.value.find(c => c.url === form.value.url)
+  return found ? found.models : []
+})
+
+function onUrlChange(val) {
+  const found = companies.value.find(c => c.url === val)
+  if (found && found.models.length > 0) {
+    form.value.model = found.models[0]
+  }
+}
+
+async function loadCompanies() {
+  try {
+    const data = await getCompanies()
+    if (data && Array.isArray(data.list)) {
+      companies.value = data.list
+    }
+  } catch (e) {
+    // non-critical: fall back to empty list (user can still type custom URL/model)
+  }
+}
+
 async function loadConfig() {
   if (props.configId) {
     const cfg = await getConfig(props.configId)
     form.value = {
       name: cfg.name,
       url: cfg.url,
-      api_key: '', // don't pre-fill key for security
+      api_key: '',
       model: cfg.model
     }
   }
@@ -104,7 +145,10 @@ async function submit() {
   }
 }
 
-onMounted(loadConfig)
+onMounted(async () => {
+  await loadCompanies()
+  await loadConfig()
+})
 </script>
 
 <style scoped>

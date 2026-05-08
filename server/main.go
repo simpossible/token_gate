@@ -21,6 +21,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 	"token_gate/internal/agent"
 	"token_gate/internal/api"
+	"token_gate/internal/company"
 	"token_gate/internal/config"
 	"token_gate/internal/database"
 	"token_gate/internal/latency"
@@ -315,6 +316,8 @@ func startServers() {
 
 	latencyCache := latency.New()
 
+	companyMgr := company.NewManager(dir)
+
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
@@ -326,7 +329,7 @@ func startServers() {
 	}()
 
 	proxyHandler := proxy.NewProxy(cache, db, latencyCache)
-	apiHandler := api.NewAPI(db, cache, processors, latencyCache)
+	apiHandler := api.NewAPI(db, cache, processors, latencyCache, companyMgr)
 
 	proxyServer := &http.Server{Addr: "127.0.0.1:12121", Handler: proxyHandler}
 	apiServer := &http.Server{Addr: "127.0.0.1:12122", Handler: apiHandler.Routes()}

@@ -137,6 +137,31 @@ Edit switching from `ConfigDetail` → `ConfigForm` uses `window.__openEdit(id)`
 
 The `GET /api/configs/:id` endpoint returns a bare `TokenConfig` (no `active_agents`). Active agent state in the detail view is derived from the `agents` prop passed down from `App.vue`, not from the config object.
 
+## Company/Vendor List (`internal/company`)
+
+The form for creating/editing a token config shows a dynamic list of vendor presets (name, API URL, and available models) fetched from `GET /api/companies`.
+
+### Data flow
+1. **Embedded default**: `server/internal/company/company.json` is embedded via `//go:embed` and used on first run.
+2. **Disk cache**: On startup, `company.Manager` reads `~/.token_gate/company.json` if it exists (written by a prior refresh).
+3. **Background refresh**: Every call to `GET /api/companies` triggers a silent goroutine that fetches the latest JSON from GitHub raw URL and saves it to disk:
+   ```
+   https://github.com/simpossible/token_gate/raw/refs/heads/master/server/internal/company/company.json
+   ```
+4. The API response always returns the current in-memory data (no blocking wait for the refresh).
+
+### JSON schema
+```json
+{
+  "list": [
+    { "name": "智谱 GLM (全球)", "url": "https://api.z.ai/api/anthropic", "models": ["glm-5", "glm-5.1"] }
+  ]
+}
+```
+
+### Updating the vendor list
+Edit `server/internal/company/company.json` and commit to master. Existing running instances will pick up the change on the next page open (background refresh).
+
 ## Key Gotchas
 
 - **`GET /api/configs` vs `GET /api/configs/:id`**: The list endpoint returns `ConfigWithAgents` (includes `active_agents`); the single-item endpoint returns only `TokenConfig`. Don't expect `active_agents` on a single-config fetch.
