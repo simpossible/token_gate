@@ -3,7 +3,7 @@
 本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 
 * API Key 管理、
 * 一键切换
-* ### 用量可视化，可以看到实际的token消耗量
+* ### 用量可视化，可以看到实际的token消耗量，以及时延情况
 
 
 
@@ -68,6 +68,8 @@ brew services start token_gate
 
 用量数据由代理自动从 SSE 响应中解析，无需额外配置。
 <img width="2758" height="1460" alt="image" src="https://github.com/user-attachments/assets/1885563d-a365-4803-907c-3d584ee04bd4" />
+
+![Uploading image.png…]()
 
 ## 工作原理
 
