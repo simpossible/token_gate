@@ -1,4 +1,4 @@
-<img width="1386" height="541" alt="image" src="https://github.com/user-attachments/assets/de5d1e94-37ab-4fe4-9d6b-19697c6fdb57" /># Token Gate
+# Token Gate
 
 本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 
 * API Key 管理、
