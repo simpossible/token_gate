@@ -28,15 +28,15 @@ type ValidConfig struct {
 }
 
 type Usage struct {
-	ID           string    `json:"id"`
-	TokenID      string    `json:"token_id"`
-	AgentType    string    `json:"agent_type"`
-	InputTokens  int       `json:"input_tokens"`
-	OutputTokens int       `json:"output_tokens"`
-	LatencyMs    int64     `json:"latency_ms"`
-	Model        string    `json:"model"`
-	RequestPath  string    `json:"request_path"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string `json:"id"`
+	TokenID      string `json:"token_id"`
+	AgentType    string `json:"agent_type"`
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	LatencyMs    int64  `json:"latency_ms"`
+	Model        string `json:"model"`
+	RequestPath  string `json:"request_path"`
+	CreatedAtTs  int64  `json:"created_at_ts"`
 }
 
 type LatestLatencyResponse struct {
@@ -82,7 +82,7 @@ type UsageResponse struct {
 	RecordsCount     int                       `json:"records_count"`
 	ByAgent          map[string]*AgentUsage    `json:"by_agent"`
 	DailyUsage       []DailyUsage              `json:"daily_usage"`
-	LatestCreatedAt  string                    `json:"latest_created_at,omitempty"`
+	LatestCreatedAtTs int64                    `json:"latest_created_at_ts,omitempty"`
 }
 
 type AgentUsage struct {

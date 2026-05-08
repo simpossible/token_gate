@@ -61,7 +61,7 @@ function formatTime(dateStr) {
 
 function renderCharts() {
   if (!usages.value.length) return
-  const xData = usages.value.map(u => formatTime(u.created_at))
+  const xData = usages.value.map(u => formatTime(u.created_at_ts))
 
   if (latencyChartRef.value) {
     if (latencyChart) latencyChart.dispose()

@@ -130,7 +130,7 @@ async function loadUsage() {
     usageData.value = await getUsage(props.configId)
 
     // Use the latest_created_at from the API response for delta queries
-    lastRefreshTime = usageData.value.latest_created_at || new Date().toISOString()
+    lastRefreshTime = usageData.value.latest_created_at_ts || Date.now()
 
     const tabs = Object.keys(usageData.value?.by_agent || {})
     if (tabs.length > 0 && !activeAgentTab.value) {
@@ -155,7 +155,7 @@ async function loadUsageDelta() {
     }
 
     // Update last refresh time to now
-    lastRefreshTime = new Date().toISOString()
+    lastRefreshTime = Date.now()
     console.log('[ConfigDetail] Updated lastRefreshTime to:', lastRefreshTime)
 
     // Merge delta usages into usageData
@@ -175,7 +175,7 @@ async function loadUsageDelta() {
         usageData.value.by_agent[u.agent_type].requests += 1
 
         // Update daily_usage data
-        const date = new Date(u.created_at).toISOString().split('T')[0]
+        const date = new Date(u.created_at_ts).toISOString().split('T')[0]
         const existingDaily = usageData.value.daily_usage.find(d => d.date === date && d.agent_type === u.agent_type)
         if (existingDaily) {
           existingDaily.input_tokens += u.input_tokens

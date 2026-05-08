@@ -66,6 +66,9 @@ func (db *DB) InitSchema() error {
 	}
 	// migrate old databases that lack the latency_ms column
 	db.Exec("ALTER TABLE usage ADD COLUMN latency_ms INTEGER NOT NULL DEFAULT 0")
+	// migrate to millisecond timestamp column
+	db.Exec("ALTER TABLE usage ADD COLUMN created_at_ts INTEGER NOT NULL DEFAULT 0")
+	db.Exec("UPDATE usage SET created_at_ts = CAST(strftime('%s', created_at) * 1000 AS INTEGER) WHERE created_at_ts = 0")
 	log.Printf("[DB] Schema initialized successfully")
 	return nil
 }
@@ -296,8 +299,8 @@ func (db *DB) RecordUsage(tokenID, agentType string, latencyMs int64, inputToken
 	log.Printf("[DB] Recording usage: token_id=%s, agent=%s, latency=%dms, input=%d, output=%d",
 		tokenID, agentType, latencyMs, inputTokens, outputTokens)
 	_, err := db.Exec(
-		"INSERT INTO usage (id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at) VALUES (?, ?, ?, ?, ?, ?, '', '', ?)",
-		uuid.New().String(), tokenID, agentType, inputTokens, outputTokens, latencyMs, time.Now(),
+		"INSERT INTO usage (id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at, created_at_ts) VALUES (?, ?, ?, ?, ?, ?, '', '', ?, ?)",
+		uuid.New().String(), tokenID, agentType, inputTokens, outputTokens, latencyMs, time.Now(), time.Now().UnixMilli(),
 	)
 	if err != nil {
 		log.Printf("[DB] Record usage failed: %v", err)
@@ -306,10 +309,10 @@ func (db *DB) RecordUsage(tokenID, agentType string, latencyMs int64, inputToken
 }
 
 func (db *DB) GetUsages(tokenID string, days int) ([]*model.Usage, error) {
-	since := time.Now().AddDate(0, 0, -days)
+	sinceMs := time.Now().AddDate(0, 0, -days).UnixMilli()
 	rows, err := db.Query(
-		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at FROM usage WHERE token_id = ? AND created_at >= ? ORDER BY created_at ASC",
-		tokenID, since,
+		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at_ts FROM usage WHERE token_id = ? AND created_at_ts >= ? ORDER BY created_at_ts ASC",
+		tokenID, sinceMs,
 	)
 	if err != nil {
 		return nil, err
@@ -319,7 +322,7 @@ func (db *DB) GetUsages(tokenID string, days int) ([]*model.Usage, error) {
 	var usages []*model.Usage
 	for rows.Next() {
 		u := &model.Usage{}
-		if err := rows.Scan(&u.ID, &u.TokenID, &u.AgentType, &u.InputTokens, &u.OutputTokens, &u.LatencyMs, &u.Model, &u.RequestPath, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.TokenID, &u.AgentType, &u.InputTokens, &u.OutputTokens, &u.LatencyMs, &u.Model, &u.RequestPath, &u.CreatedAtTs); err != nil {
 			return nil, err
 		}
 		usages = append(usages, u)
@@ -327,12 +330,10 @@ func (db *DB) GetUsages(tokenID string, days int) ([]*model.Usage, error) {
 	return usages, rows.Err()
 }
 
-func (db *DB) GetUsagesAfter(tokenID string, after time.Time) ([]*model.Usage, error) {
-	// Convert to local timezone for comparison to match database storage
-	afterLocal := after.Local()
+func (db *DB) GetUsagesAfter(tokenID string, afterTs int64) ([]*model.Usage, error) {
 	rows, err := db.Query(
-		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at FROM usage WHERE token_id = ? AND datetime(created_at) > datetime(?) ORDER BY created_at ASC",
-		tokenID, afterLocal.Format("2006-01-02 15:04:05.000000"),
+		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at_ts FROM usage WHERE token_id = ? AND created_at_ts > ? ORDER BY created_at_ts ASC",
+		tokenID, afterTs,
 	)
 	if err != nil {
 		return nil, err
@@ -342,7 +343,7 @@ func (db *DB) GetUsagesAfter(tokenID string, after time.Time) ([]*model.Usage, e
 	var usages []*model.Usage
 	for rows.Next() {
 		u := &model.Usage{}
-		if err := rows.Scan(&u.ID, &u.TokenID, &u.AgentType, &u.InputTokens, &u.OutputTokens, &u.LatencyMs, &u.Model, &u.RequestPath, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.TokenID, &u.AgentType, &u.InputTokens, &u.OutputTokens, &u.LatencyMs, &u.Model, &u.RequestPath, &u.CreatedAtTs); err != nil {
 			return nil, err
 		}
 		usages = append(usages, u)
@@ -351,8 +352,8 @@ func (db *DB) GetUsagesAfter(tokenID string, after time.Time) ([]*model.Usage, e
 }
 
 func (db *DB) CleanupOldUsage(retainDays int) error {
-	cutoff := time.Now().AddDate(0, 0, -retainDays)
-	_, err := db.Exec("DELETE FROM usage WHERE created_at < ?", cutoff)
+	cutoffMs := time.Now().AddDate(0, 0, -retainDays).UnixMilli()
+	_, err := db.Exec("DELETE FROM usage WHERE created_at_ts < ?", cutoffMs)
 	return err
 }
 
@@ -392,8 +393,8 @@ func (db *DB) GetUsage(tokenID string) (*model.UsageResponse, error) {
 	}
 
 	dailyRows, err := db.Query(
-		`SELECT COALESCE(DATE(created_at), ''), agent_type, SUM(input_tokens), SUM(output_tokens), COUNT(*)
-		 FROM usage WHERE token_id = ? GROUP BY DATE(created_at), agent_type ORDER BY DATE(created_at) DESC`,
+		`SELECT COALESCE(DATE(datetime(created_at_ts/1000, 'unixepoch')), ''), agent_type, SUM(input_tokens), SUM(output_tokens), COUNT(*)
+		 FROM usage WHERE token_id = ? GROUP BY DATE(datetime(created_at_ts/1000, 'unixepoch')), agent_type ORDER BY DATE(datetime(created_at_ts/1000, 'unixepoch')) DESC`,
 		tokenID,
 	)
 	if err != nil {
@@ -412,14 +413,14 @@ func (db *DB) GetUsage(tokenID string) (*model.UsageResponse, error) {
 		return nil, err
 	}
 
-	// Get the latest created_at time for delta queries
-	var latestCreatedAt time.Time
+	// Get the latest created_at_ts for delta queries
+	var latestTs int64
 	err = db.QueryRow(
-		"SELECT MAX(created_at) FROM usage WHERE token_id = ?",
+		"SELECT COALESCE(MAX(created_at_ts), 0) FROM usage WHERE token_id = ?",
 		tokenID,
-	).Scan(&latestCreatedAt)
-	if err == nil && !latestCreatedAt.IsZero() {
-		resp.LatestCreatedAt = latestCreatedAt.Format(time.RFC3339)
+	).Scan(&latestTs)
+	if err == nil && latestTs > 0 {
+		resp.LatestCreatedAtTs = latestTs
 	}
 
 	return resp, nil

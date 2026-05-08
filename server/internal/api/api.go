@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -332,14 +331,14 @@ func (a *API) getUsageDelta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	after, err := time.Parse(time.RFC3339, afterStr)
+	after, err := strconv.ParseInt(afterStr, 10, 64)
 	if err != nil {
 		log.Printf("[API] get usage delta failed: invalid 'after' parameter: %s, error: %v", afterStr, err)
 		writeError(w, http.StatusBadRequest, "invalid 'after' parameter format")
 		return
 	}
 
-	log.Printf("[API] get usage delta: id=%s, after=%s (parsed: %v)", id, afterStr, after)
+	log.Printf("[API] get usage delta: id=%s, after=%d", id, after)
 
 	usages, err := a.db.GetUsagesAfter(id, after)
 	if err != nil {
