@@ -434,6 +434,43 @@ func (db *DB) GetUsageSummary(tokenID string) (inputTokens, outputTokens int, er
 	return
 }
 
+// FindConfigByURLAndKey returns the config matching url+apiKey with the most recent usage.
+func (db *DB) FindConfigByURLAndKey(url, apiKey string) (*model.TokenConfig, error) {
+	c := &model.TokenConfig{}
+	err := db.QueryRow(`
+		SELECT tc.id, tc.name, tc.url, tc.api_key, tc.model, tc.created_at, tc.updated_at
+		FROM token_config tc
+		LEFT JOIN (
+			SELECT token_id, MAX(created_at_ts) AS last_used FROM usage GROUP BY token_id
+		) u ON tc.id = u.token_id
+		WHERE tc.url = ? AND tc.api_key = ?
+		ORDER BY COALESCE(u.last_used, 0) DESC, tc.updated_at DESC
+		LIMIT 1`, url, apiKey,
+	).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return c, err
+}
+
+// FindMostRecentlyUsedConfig returns the config with the most recent usage, or most recently updated if no usage.
+func (db *DB) FindMostRecentlyUsedConfig() (*model.TokenConfig, error) {
+	c := &model.TokenConfig{}
+	err := db.QueryRow(`
+		SELECT tc.id, tc.name, tc.url, tc.api_key, tc.model, tc.created_at, tc.updated_at
+		FROM token_config tc
+		LEFT JOIN (
+			SELECT token_id, MAX(created_at_ts) AS last_used FROM usage GROUP BY token_id
+		) u ON tc.id = u.token_id
+		ORDER BY COALESCE(u.last_used, 0) DESC, tc.updated_at DESC
+		LIMIT 1`,
+	).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.CreatedAt, &c.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return c, err
+}
+
 // Scan existing Claude Code settings for auto-import
 func (db *DB) ImportExistingConfig(name, url, apiKey, modelStr string) error {
 	log.Printf("[DB] Importing existing config: name=%s, url=%s", name, url)

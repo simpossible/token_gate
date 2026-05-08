@@ -306,12 +306,15 @@ func startServers() {
 		log.Fatalf("load cache: %v", err)
 	}
 
-	isEmpty, err := db.IsEmpty()
-	if err != nil {
-		log.Fatalf("check db: %v", err)
+	hasActive := false
+	for _, p := range processors {
+		if vc, _ := db.GetActiveConfig(p.GetType()); vc != nil {
+			hasActive = true
+			break
+		}
 	}
-	if isEmpty {
-		importExistingConfig(db, cache, processors)
+	if !hasActive {
+		restoreOrImportConfig(db, cache, processors)
 	}
 
 	latencyCache := latency.New()
@@ -371,63 +374,115 @@ func startServers() {
 	}
 }
 
+func readClaudeSettings() (apiKey, baseURL, modelStr string) {
+	home, _ := os.UserHomeDir()
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if err != nil {
+		return
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return
+	}
+	env, _ := settings["env"].(map[string]interface{})
+	if v, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok && v != "" && v != "placeholder" {
+		apiKey = v
+	}
+	if apiKey == "" {
+		if v, ok := env["ANTHROPIC_API_KEY"].(string); ok && v != "" && v != "placeholder" {
+			apiKey = v
+		}
+	}
+	if v, ok := env["ANTHROPIC_BASE_URL"].(string); ok && v != "" {
+		baseURL = v
+	}
+	if v, ok := env["ANTHROPIC_MODEL"].(string); ok && v != "" {
+		modelStr = v
+	} else if v, ok := settings["model"].(string); ok && v != "" {
+		modelStr = v
+	}
+	if modelStr == "" {
+		modelStr = "claude-sonnet-4-6"
+	}
+	return
+}
+
+func activateConfigForProcessors(tc *model.TokenConfig, db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
+	for _, p := range processors {
+		if err := db.ActivateConfig(tc.ID, p.GetType()); err != nil {
+			log.Printf("[MAIN] activate config failed: agent=%s, error=%v", p.GetType(), err)
+			continue
+		}
+		cache.Set(p.GetType(), tc)
+		if err := p.OnActivate(tc); err != nil {
+			log.Printf("[MAIN] OnActivate failed: agent=%s, error=%v", p.GetType(), err)
+		}
+		log.Printf("[MAIN] activated config: name=%s, id=%s, agent=%s", tc.Name, tc.ID, p.GetType())
+	}
+}
+
+func restoreOrImportConfig(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
+	apiKey, baseURL, _ := readClaudeSettings()
+
+	// Detect if settings.json already points to our own proxy (written by token_gate itself)
+	isProxyURL := strings.HasPrefix(baseURL, "http://127.0.0.1:12121/")
+	hasRealSettings := apiKey != "" && baseURL != "" && !isProxyURL
+
+	var target *model.TokenConfig
+
+	if hasRealSettings {
+		tc, err := db.FindConfigByURLAndKey(baseURL, apiKey)
+		if err != nil {
+			log.Printf("[MAIN] restore: find by url+key error: %v", err)
+		}
+		if tc != nil {
+			log.Printf("[MAIN] restore: found matching config: name=%s, id=%s", tc.Name, tc.ID)
+			target = tc
+		}
+	}
+
+	if target == nil {
+		tc, err := db.FindMostRecentlyUsedConfig()
+		if err != nil {
+			log.Printf("[MAIN] restore: find most recent error: %v", err)
+		}
+		if tc != nil {
+			log.Printf("[MAIN] restore: using most recently used config: name=%s, id=%s", tc.Name, tc.ID)
+			target = tc
+		}
+	}
+
+	if target == nil {
+		if !hasRealSettings {
+			log.Printf("[MAIN] restore: no configs in DB and no valid settings, skipping")
+			return
+		}
+		log.Printf("[MAIN] restore: no existing config found, importing from settings")
+		importExistingConfig(db, cache, processors)
+		return
+	}
+
+	activateConfigForProcessors(target, db, cache, processors)
+	cache.Load()
+}
+
 func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
 	home, _ := os.UserHomeDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	log.Printf("[MAIN] Checking for existing Claude Code config at: %s", settingsPath)
 
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		log.Printf("[MAIN] No existing settings file found, skipping import")
-		return
-	}
-
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		log.Printf("[MAIN] Failed to parse settings file: %v", err)
-		return
-	}
-
-	env, ok := settings["env"].(map[string]interface{})
-	if !ok {
-		log.Printf("[MAIN] No env section in settings file")
-		return
-	}
-
-	apiKey := ""
-	if v, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok && v != "" && v != "placeholder" {
-		apiKey = v
-		log.Printf("[MAIN] Found ANTHROPIC_AUTH_TOKEN in settings")
-	}
-	if apiKey == "" {
-		if v, ok := env["ANTHROPIC_API_KEY"].(string); ok && v != "" && v != "placeholder" {
-			apiKey = v
-			log.Printf("[MAIN] Found ANTHROPIC_API_KEY in settings")
-		}
-	}
+	apiKey, baseURL, modelStr := readClaudeSettings()
 	if apiKey == "" {
 		log.Printf("[MAIN] No valid API key found in settings, skipping import")
 		return
 	}
 
-	baseURL := "https://open.bigmodel.cn/api/anthropic"
-	if v, ok := env["ANTHROPIC_BASE_URL"].(string); ok && v != "" && v != "http://127.0.0.1:12121/claude_code" {
-		baseURL = v
-		log.Printf("[MAIN] Found custom base URL: %s", baseURL)
-	} else if v == "http://127.0.0.1:12121/claude_code" {
-		log.Printf("[MAIN] Base URL already points to token_gate proxy, using default")
+	if baseURL == "" || strings.HasPrefix(baseURL, "http://127.0.0.1:12121/") {
+		baseURL = "https://open.bigmodel.cn/api/anthropic"
+		log.Printf("[MAIN] No valid base URL, using default: %s", baseURL)
 	}
 
-	modelStr := "claude-sonnet-4-6"
-	if v, ok := env["ANTHROPIC_MODEL"].(string); ok && v != "" {
-		modelStr = v
-		log.Printf("[MAIN] Found custom model in env: %s", modelStr)
-	} else if v, ok := settings["model"].(string); ok && v != "" {
-		modelStr = v
-		log.Printf("[MAIN] Found model in settings: %s", modelStr)
-	}
-
-	log.Printf("[MAIN] Importing config: name=default, url=%s, model=%s", baseURL, modelStr)
+	log.Printf("[MAIN] Importing config: url=%s, model=%s", baseURL, modelStr)
 	if err := db.ImportExistingConfig("default", baseURL, apiKey, modelStr); err != nil {
 		log.Printf("[MAIN] warning: import existing config: %v", err)
 		return
