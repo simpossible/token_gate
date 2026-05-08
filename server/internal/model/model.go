@@ -82,6 +82,7 @@ type UsageResponse struct {
 	RecordsCount     int                       `json:"records_count"`
 	ByAgent          map[string]*AgentUsage    `json:"by_agent"`
 	DailyUsage       []DailyUsage              `json:"daily_usage"`
+	LatestCreatedAt  string                    `json:"latest_created_at,omitempty"`
 }
 
 type AgentUsage struct {

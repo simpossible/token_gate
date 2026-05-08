@@ -44,6 +44,10 @@ export function getUsages(id, days = 7) {
   return api.get(`/api/configs/${id}/usages?days=${days}`).then(r => r.data.usages)
 }
 
+export function getUsageDelta(id, after) {
+  return api.get(`/api/configs/${id}/usages/delta?after=${after}`).then(r => r.data.usages)
+}
+
 export function getLatestLatency(id) {
   return api.get(`/api/configs/${id}/latency/latest`).then(r => r.data)
 }

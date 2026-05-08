@@ -85,7 +85,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Monitor } from '@element-plus/icons-vue'
-import { getConfig, deleteConfig, activateConfig, deactivateConfig, getUsage } from '../api/index.js'
+import { getConfig, deleteConfig, activateConfig, deactivateConfig, getUsage, getUsageDelta } from '../api/index.js'
 import RequestChart from '../components/RequestChart.vue'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -103,6 +103,8 @@ const activeAgentTab = ref('')
 const usageData = ref(null)
 const chartRef = ref(null)
 let chartInstance = null
+let refreshTimer = null
+let lastRefreshTime = null
 
 function isActiveForAgent(agent) {
   return agent.active_config_id === props.configId
@@ -126,18 +128,77 @@ async function loadConfig() {
 async function loadUsage() {
   try {
     usageData.value = await getUsage(props.configId)
+
+    // Use the latest_created_at from the API response for delta queries
+    lastRefreshTime = usageData.value.latest_created_at || new Date().toISOString()
+
     const tabs = Object.keys(usageData.value?.by_agent || {})
     if (tabs.length > 0 && !activeAgentTab.value) {
       activeAgentTab.value = tabs[0]
     }
     await nextTick()
-    renderChart()
+    renderChart(true)
   } catch (_) {
     // no usage yet
   }
 }
 
-function renderChart() {
+async function loadUsageDelta() {
+  if (!lastRefreshTime) return
+
+  try {
+    const deltaUsages = await getUsageDelta(props.configId, lastRefreshTime)
+    if (!deltaUsages || deltaUsages.length === 0) {
+      return
+    }
+
+    // Update last refresh time to now
+    lastRefreshTime = new Date().toISOString()
+
+    // Merge delta usages into usageData
+    if (usageData.value) {
+      // Update totals
+      deltaUsages.forEach(u => {
+        usageData.value.total_input_tokens = (usageData.value.total_input_tokens || 0) + u.input_tokens
+        usageData.value.total_output_tokens = (usageData.value.total_output_tokens || 0) + u.output_tokens
+        usageData.value.records_count = (usageData.value.records_count || 0) + 1
+
+        // Update by_agent data
+        if (!usageData.value.by_agent[u.agent_type]) {
+          usageData.value.by_agent[u.agent_type] = { input_tokens: 0, output_tokens: 0, requests: 0 }
+        }
+        usageData.value.by_agent[u.agent_type].input_tokens += u.input_tokens
+        usageData.value.by_agent[u.agent_type].output_tokens += u.output_tokens
+        usageData.value.by_agent[u.agent_type].requests += 1
+
+        // Update daily_usage data
+        const date = new Date(u.created_at).toISOString().split('T')[0]
+        const existingDaily = usageData.value.daily_usage.find(d => d.date === date && d.agent_type === u.agent_type)
+        if (existingDaily) {
+          existingDaily.input_tokens += u.input_tokens
+          existingDaily.output_tokens += u.output_tokens
+          existingDaily.requests += 1
+        } else {
+          usageData.value.daily_usage.push({
+            date: date,
+            agent_type: u.agent_type,
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            requests: 1
+          })
+        }
+      })
+
+      // Re-render chart without animation
+      await nextTick()
+      renderChart(false)
+    }
+  } catch (e) {
+    console.error('Failed to load usage delta:', e)
+  }
+}
+
+async function renderChart(animate = true) {
   if (!usageData.value?.daily_usage || !chartRef.value) return
 
   const agentData = usageData.value.daily_usage.filter(d => d.agent_type === activeAgentTab.value)
@@ -149,6 +210,7 @@ function renderChart() {
   }
   chartInstance = echarts.init(chartRef.value)
   chartInstance.setOption({
+    animation: animate,
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     legend: { data: ['Input', 'Output'] },
     grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
@@ -163,7 +225,7 @@ function renderChart() {
 
 async function onTabChange() {
   await nextTick()
-  renderChart()
+  renderChart(true)
 }
 
 function agentLabel(type) {
@@ -211,9 +273,16 @@ function formatTokens(tokens) {
   return tokens.toLocaleString()
 }
 
-onMounted(loadConfig)
+onMounted(() => {
+  loadConfig()
+  refreshTimer = setInterval(loadUsageDelta, 5000)
+})
 
 onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null

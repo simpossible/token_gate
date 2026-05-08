@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -43,6 +44,7 @@ func (a *API) Routes() http.Handler {
 		r.Delete("/", a.deleteConfig)
 		r.Get("/usage", a.getUsage)
 		r.Get("/usages", a.getUsages)
+		r.Get("/usages/delta", a.getUsageDelta)
 		r.Get("/latency/latest", a.getLatestLatency)
 		r.Post("/activate", a.activateConfig)
 		r.Post("/deactivate", a.deactivateConfig)
@@ -312,6 +314,34 @@ func (a *API) getUsages(w http.ResponseWriter, r *http.Request) {
 	usages, err := a.db.GetUsages(id, days)
 	if err != nil {
 		log.Printf("[API] get usages failed: id=%s, error=%v", id, err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if usages == nil {
+		usages = []*model.Usage{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"usages": usages})
+}
+
+func (a *API) getUsageDelta(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	afterStr := r.URL.Query().Get("after")
+	if afterStr == "" {
+		log.Printf("[API] get usage delta failed: missing 'after' parameter")
+		writeError(w, http.StatusBadRequest, "missing 'after' parameter")
+		return
+	}
+
+	after, err := time.Parse(time.RFC3339, afterStr)
+	if err != nil {
+		log.Printf("[API] get usage delta failed: invalid 'after' parameter: %v", err)
+		writeError(w, http.StatusBadRequest, "invalid 'after' parameter format")
+		return
+	}
+
+	usages, err := a.db.GetUsagesAfter(id, after)
+	if err != nil {
+		log.Printf("[API] get usage delta failed: id=%s, error=%v", id, err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

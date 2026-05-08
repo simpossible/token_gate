@@ -327,6 +327,27 @@ func (db *DB) GetUsages(tokenID string, days int) ([]*model.Usage, error) {
 	return usages, rows.Err()
 }
 
+func (db *DB) GetUsagesAfter(tokenID string, after time.Time) ([]*model.Usage, error) {
+	rows, err := db.Query(
+		"SELECT id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at FROM usage WHERE token_id = ? AND created_at > ? ORDER BY created_at ASC",
+		tokenID, after,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var usages []*model.Usage
+	for rows.Next() {
+		u := &model.Usage{}
+		if err := rows.Scan(&u.ID, &u.TokenID, &u.AgentType, &u.InputTokens, &u.OutputTokens, &u.LatencyMs, &u.Model, &u.RequestPath, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		usages = append(usages, u)
+	}
+	return usages, rows.Err()
+}
+
 func (db *DB) CleanupOldUsage(retainDays int) error {
 	cutoff := time.Now().AddDate(0, 0, -retainDays)
 	_, err := db.Exec("DELETE FROM usage WHERE created_at < ?", cutoff)
@@ -385,7 +406,21 @@ func (db *DB) GetUsage(tokenID string) (*model.UsageResponse, error) {
 		}
 		resp.DailyUsage = append(resp.DailyUsage, du)
 	}
-	return resp, dailyRows.Err()
+	if err := dailyRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Get the latest created_at time for delta queries
+	var latestCreatedAt string
+	err = db.QueryRow(
+		"SELECT MAX(created_at) FROM usage WHERE token_id = ?",
+		tokenID,
+	).Scan(&latestCreatedAt)
+	if err == nil && latestCreatedAt != "" {
+		resp.LatestCreatedAt = latestCreatedAt
+	}
+
+	return resp, nil
 }
 
 func (db *DB) GetUsageSummary(tokenID string) (inputTokens, outputTokens int, err error) {
