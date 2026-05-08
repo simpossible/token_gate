@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"token_gate/internal/config"
 	"token_gate/internal/database"
 	"token_gate/internal/latency"
+	"token_gate/internal/model"
 	"token_gate/internal/proxy"
 	"token_gate/internal/web"
 )
@@ -313,25 +316,56 @@ func startServers() {
 	proxyHandler := proxy.NewProxy(cache, db, latencyCache)
 	apiHandler := api.NewAPI(db, cache, processors, latencyCache)
 
+	// Setup graceful shutdown
+	shutdownChan := make(chan struct{})
+	shutdownDone := make(chan struct{})
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+		<-sigChan
+		log.Println("[MAIN] Shutdown signal received, cleaning up active configs...")
+		cleanupAllConfigs(db, cache, processors)
+		close(shutdownChan)
+		close(shutdownDone)
+	}()
+
 	go func() {
 		log.Println("[SERVER] API Proxy on http://127.0.0.1:12121")
 		if err := http.ListenAndServe("127.0.0.1:12121", proxyHandler); err != nil {
-			log.Fatalf("proxy server: %v", err)
+			select {
+			case <-shutdownChan:
+				return
+			default:
+				log.Fatalf("proxy server: %v", err)
+			}
 		}
 	}()
 
 	go func() {
 		log.Println("[SERVER] Config API on http://127.0.0.1:12122")
 		if err := http.ListenAndServe("127.0.0.1:12122", apiHandler.Routes()); err != nil {
-			log.Fatalf("api server: %v", err)
+			select {
+			case <-shutdownChan:
+				return
+			default:
+				log.Fatalf("api server: %v", err)
+			}
 		}
 	}()
 
 	log.Println("[SERVER] Web GUI on http://127.0.0.1:12123")
 	log.Println("=== Token Gate Ready ===")
 	if err := http.ListenAndServe("127.0.0.1:12123", web.Handler()); err != nil {
-		log.Fatalf("web server: %v", err)
+		select {
+		case <-shutdownChan:
+			return
+		default:
+			log.Fatalf("web server: %v", err)
+		}
 	}
+
+	<-shutdownDone
+	log.Println("[MAIN] Shutdown complete")
 }
 
 func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
@@ -411,4 +445,60 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 	}
 
 	log.Println("[MAIN] Successfully imported existing Claude Code configuration")
+}
+
+func cleanupAllConfigs(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
+	validConfigs, err := db.ListActiveConfigs()
+	if err != nil {
+		log.Printf("[MAIN] cleanup: failed to list active configs: %v", err)
+		return
+	}
+
+	if len(validConfigs) == 0 {
+		log.Println("[MAIN] cleanup: no active configs to restore")
+		return
+	}
+
+	log.Printf("[MAIN] cleanup: found %d active configs to restore", len(validConfigs))
+
+	processorMap := make(map[string]agent.AgentProcessor)
+	for _, p := range processors {
+		processorMap[p.GetType()] = p
+	}
+
+	var wg sync.WaitGroup
+	for _, vc := range validConfigs {
+		wg.Add(1)
+		go func(vc *model.ValidConfig) {
+			defer wg.Done()
+			log.Printf("[MAIN] cleanup: deactivating config for agent_type=%s", vc.AgentType)
+
+			tc, err := db.GetTokenConfig(vc.TokenID)
+			if err != nil {
+				log.Printf("[MAIN] cleanup: failed to get token config %s: %v", vc.TokenID, err)
+				return
+			}
+			if tc == nil {
+				log.Printf("[MAIN] cleanup: token config %s not found", vc.TokenID)
+				return
+			}
+
+			if processor, ok := processorMap[vc.AgentType]; ok {
+				if err := processor.OnDeactivate(tc); err != nil {
+					log.Printf("[MAIN] cleanup: OnDeactivate failed for agent_type=%s: %v", vc.AgentType, err)
+				} else {
+					log.Printf("[MAIN] cleanup: successfully restored settings for agent_type=%s", vc.AgentType)
+				}
+			}
+
+			if err := db.DeactivateConfig(vc.AgentType); err != nil {
+				log.Printf("[MAIN] cleanup: failed to deactivate config from DB for agent_type=%s: %v", vc.AgentType, err)
+			}
+
+			cache.Remove(vc.AgentType)
+		}(vc)
+	}
+	wg.Wait()
+
+	log.Println("[MAIN] cleanup: all configs deactivated and settings restored")
 }
