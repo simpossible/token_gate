@@ -411,13 +411,13 @@ func (db *DB) GetUsage(tokenID string) (*model.UsageResponse, error) {
 	}
 
 	// Get the latest created_at time for delta queries
-	var latestCreatedAt string
+	var latestCreatedAt time.Time
 	err = db.QueryRow(
 		"SELECT MAX(created_at) FROM usage WHERE token_id = ?",
 		tokenID,
 	).Scan(&latestCreatedAt)
-	if err == nil && latestCreatedAt != "" {
-		resp.LatestCreatedAt = latestCreatedAt
+	if err == nil && !latestCreatedAt.IsZero() {
+		resp.LatestCreatedAt = latestCreatedAt.Format(time.RFC3339)
 	}
 
 	return resp, nil
