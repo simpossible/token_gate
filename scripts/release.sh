@@ -58,8 +58,8 @@ done
 # ── 3. Get SHA256s from CI-built checksums ─────────────────────────────────
 echo "==> Fetching SHA256s from CI release..."
 CHECKSUMS=$(curl -sL "$CHECKSUMS_URL")
-ARM64_SHA=$(echo "$CHECKSUMS" | grep arm64 | awk '{print $1}')
-AMD64_SHA=$(echo "$CHECKSUMS" | grep amd64 | awk '{print $1}')
+ARM64_SHA=$(echo "$CHECKSUMS" | grep darwin_arm64 | awk '{print $1}')
+AMD64_SHA=$(echo "$CHECKSUMS" | grep darwin_amd64 | awk '{print $1}')
 echo "    arm64: $ARM64_SHA"
 echo "    amd64: $AMD64_SHA"
 
