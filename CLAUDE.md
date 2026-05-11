@@ -168,3 +168,6 @@ Edit `server/internal/company/company.json` and commit to master. Existing runni
 - **`@updated` propagation**: When `ConfigDetail` emits `updated`, `App.vue` must reload both configs and agents to keep the agent switch state consistent.
 - **Web embed requires a build first**: `server/internal/web/dist/` must exist before `go build`. Running `go build` without it will fail due to the `//go:embed dist/*` directive.
 - **CORS**: The API server (port 12122) returns `Access-Control-Allow-Origin: *` headers. Port 12123 (web) and port 12122 (API) are different origins so this is required even in production.
+
+## attendion
+每次重要的功能设计变更要更新到项目知识文档中
