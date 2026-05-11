@@ -35,6 +35,18 @@ curl -L https://github.com/simpossible/token_gate/releases/latest/download/token
 sudo mv token_gate_linux_arm64 /usr/local/bin/token_gate
 ```
 
+### Windows — 直接下载
+
+从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载 `token_gate_windows_amd64.zip`，解压后将 `token_gate_windows_amd64.exe` 重命名为 `token_gate.exe` 并放入 PATH 目录（例如 `C:\Program Files\token_gate\`）。
+
+Windows 下用任务计划程序实现开机自启：以管理员身份运行 PowerShell，执行：
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "C:\Program Files\token_gate\token_gate.exe" -Argument "server"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "TokenGate" -Action $action -Trigger $trigger -RunLevel Highest
+```
+
 ### 从源码构建
 
 需要 Go 1.21+ 和 Node.js 18+。

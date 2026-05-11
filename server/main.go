@@ -9,13 +9,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -89,7 +87,7 @@ func readPID() (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if err := proc.Signal(syscall.Signal(0)); err != nil {
+	if !isProcessAlive(proc) {
 		return 0, false
 	}
 	return pid, true
@@ -128,7 +126,7 @@ func cmdStart() {
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setDaemonProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start: %v\n", err)
 		os.Exit(1)
@@ -167,7 +165,7 @@ func cmdStop() {
 	}
 
 	proc, _ := os.FindProcess(pid)
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := terminateProcess(proc); err != nil {
 		fmt.Fprintf(os.Stderr, "error stopping process: %v\n", err)
 		os.Exit(1)
 	}
@@ -177,7 +175,7 @@ func cmdStop() {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
-		if err := proc.Signal(syscall.Signal(0)); err != nil {
+		if !isProcessAlive(proc) {
 			fmt.Println(" stopped")
 			return
 		}
@@ -217,6 +215,8 @@ func openBrowser(url string) {
 		cmd = exec.Command("open", url)
 	case "linux":
 		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
 	default:
 		return
 	}
@@ -340,7 +340,7 @@ func startServers() {
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+		registerShutdownSignals(sigChan)
 		<-sigChan
 		log.Println("[MAIN] Shutdown signal received, cleaning up active configs...")
 		cleanupAllConfigs(db, cache, processors)

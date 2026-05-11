@@ -35,6 +35,18 @@ curl -L https://github.com/simpossible/token_gate/releases/latest/download/token
 sudo mv token_gate_linux_arm64 /usr/local/bin/token_gate
 ```
 
+### Windows — Direct download
+
+Download `token_gate_windows_amd64.zip` from [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest), extract it, rename `token_gate_windows_amd64.exe` to `token_gate.exe`, and place it in a PATH directory (e.g. `C:\Program Files\token_gate\`).
+
+To start automatically at login on Windows, run the following in an elevated PowerShell:
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "C:\Program Files\token_gate\token_gate.exe" -Argument "server"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "TokenGate" -Action $action -Trigger $trigger -RunLevel Highest
+```
+
 ### Build from source
 
 Requires Go 1.21+ and Node.js 18+.
