@@ -12,11 +12,27 @@ A local Claude API proxy gateway for AI coding tools (Claude Code, Cursor, etc.)
 
 ## Installation
 
-### Homebrew (recommended)
+### macOS — Homebrew (recommended)
 
 ```bash
 brew tap simpossible/tap
 brew install token_gate
+```
+
+### Linux — Direct download
+
+Download the pre-built binary for your architecture from [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest):
+
+```bash
+# amd64 (x86_64)
+curl -L https://github.com/simpossible/token_gate/releases/latest/download/token_gate_linux_amd64.tar.gz | tar xz
+sudo mv token_gate_linux_amd64 /usr/local/bin/token_gate
+```
+
+```bash
+# arm64
+curl -L https://github.com/simpossible/token_gate/releases/latest/download/token_gate_linux_arm64.tar.gz | tar xz
+sudo mv token_gate_linux_arm64 /usr/local/bin/token_gate
 ```
 
 ### Build from source
@@ -42,10 +58,29 @@ token_gate show     # open Web UI (starts automatically if not running)
 token_gate status   # show running status
 ```
 
-You can also set it to start on login via Homebrew Services:
+You can also set it to start on login via Homebrew Services (macOS):
 
 ```bash
 brew services start token_gate
+```
+
+On Linux, use systemd to start on boot:
+
+```bash
+sudo tee /etc/systemd/system/token_gate.service > /dev/null <<EOF
+[Unit]
+Description=Token Gate
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/token_gate server
+Restart=always
+User=$USER
+
+[Install]
+WantedBy=default.target
+EOF
+sudo systemctl enable --now token_gate
 ```
 
 The Web UI is available at http://127.0.0.1:12123 after startup.

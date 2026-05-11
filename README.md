@@ -12,11 +12,27 @@
 
 ## 安装
 
-### Homebrew（推荐）
+### macOS — Homebrew（推荐）
 
 ```bash
 brew tap simpossible/tap
 brew install token_gate
+```
+
+### Linux — 直接下载
+
+从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载对应架构的预编译二进制：
+
+```bash
+# amd64（x86_64）
+curl -L https://github.com/simpossible/token_gate/releases/latest/download/token_gate_linux_amd64.tar.gz | tar xz
+sudo mv token_gate_linux_amd64 /usr/local/bin/token_gate
+```
+
+```bash
+# arm64
+curl -L https://github.com/simpossible/token_gate/releases/latest/download/token_gate_linux_arm64.tar.gz | tar xz
+sudo mv token_gate_linux_arm64 /usr/local/bin/token_gate
 ```
 
 ### 从源码构建
@@ -42,10 +58,29 @@ token_gate show     # 打开 Web 界面（如未运行则自动启动）
 token_gate status   # 查看运行状态
 ```
 
-也可以通过 Homebrew Services 设置开机自启：
+也可以通过 Homebrew Services 设置开机自启（macOS）：
 
 ```bash
 brew services start token_gate
+```
+
+Linux 下可用 systemd 设置开机自启：
+
+```bash
+sudo tee /etc/systemd/system/token_gate.service > /dev/null <<EOF
+[Unit]
+Description=Token Gate
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/token_gate server
+Restart=always
+User=$USER
+
+[Install]
+WantedBy=default.target
+EOF
+sudo systemctl enable --now token_gate
 ```
 
 启动后，Web 界面默认在 http://127.0.0.1:12123 打开。
