@@ -17,7 +17,14 @@ Releasing a new version is a single command (no `gh` CLI auth needed — only SS
 
 The script does everything in order:
 1. Tags the commit and pushes tag + master to GitHub
-2. GitHub Actions (`.github/workflows/release.yml`) triggers automatically: cross-compiles for `darwin/arm64` and `darwin/amd64`, uploads tarballs + `checksums.txt` as release assets
+2. GitHub Actions (`.github/workflows/release.yml`) triggers automatically: cross-compiles for all five targets, uploads archives + `checksums.txt` as release assets:
+   | Platform | Archive |
+   |----------|---------|
+   | `darwin/arm64` | `.tar.gz` |
+   | `darwin/amd64` | `.tar.gz` |
+   | `linux/amd64`  | `.tar.gz` |
+   | `linux/arm64`  | `.tar.gz` |
+   | `windows/amd64`| `.zip`   |
 3. Script polls until `checksums.txt` is available (~5-8 min)
 4. Fetches CI-built SHA256s from `checksums.txt`
 5. Clones `simpossible/homebrew-tap` via SSH, regenerates the formula with the new version and SHA256s, and pushes
@@ -168,6 +175,28 @@ Edit `server/internal/company/company.json` and commit to master. Existing runni
 - **`@updated` propagation**: When `ConfigDetail` emits `updated`, `App.vue` must reload both configs and agents to keep the agent switch state consistent.
 - **Web embed requires a build first**: `server/internal/web/dist/` must exist before `go build`. Running `go build` without it will fail due to the `//go:embed dist/*` directive.
 - **CORS**: The API server (port 12122) returns `Access-Control-Allow-Origin: *` headers. Port 12123 (web) and port 12122 (API) are different origins so this is required even in production.
+
+## Cross-Platform Support
+
+The binary targets macOS, Linux, and Windows. Platform-specific daemon/signal code is split into two files via build tags:
+
+| File | Build tag | Responsibility |
+|------|-----------|----------------|
+| `server/daemon_unix.go` | `//go:build !windows` | `Setsid=true` for session detach, `SIGTERM`/`Signal(0)` for process control |
+| `server/daemon_windows.go` | `//go:build windows` | `CREATE_NO_WINDOW` flag for detach, `OpenProcess`+`GetExitCodeProcess` for liveness, `proc.Kill()` for termination |
+
+Four helper functions are declared in both files (one wins at compile time):
+
+```go
+isProcessAlive(proc *os.Process) bool   // check if PID is still running
+terminateProcess(proc *os.Process) error // graceful stop (SIGTERM on Unix, Kill on Windows)
+setDaemonProcess(cmd *exec.Cmd)          // detach from terminal before exec
+registerShutdownSignals(ch chan os.Signal) // SIGTERM+SIGINT on Unix, Interrupt on Windows
+```
+
+`main.go` imports neither `syscall` nor `os/signal` directly — all platform-specific calls go through these helpers.
+
+**`~/.claude/settings.json` path**: `os.UserHomeDir()` + `.claude/settings.json` works on all three platforms (Claude Code CLI follows Unix dotfile convention even on Windows).
 
 ## attendion
 每次重要的功能设计变更要更新到项目知识文档中
