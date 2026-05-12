@@ -26,8 +26,9 @@ class TrayService with TrayListener {
 
   void _onEvent(EventMessage msg) {
     if (msg.type == 'total_token_change') {
-      final addedIn = msg.data['added_in_tokens'] as int? ?? 0;
-      final addedOut = msg.data['added_out_tokens'] as int? ?? 0;
+      final payload = msg.data['payload'] as Map<String, dynamic>? ?? {};
+      final addedIn = payload['added_in_tokens'] as int? ?? 0;
+      final addedOut = payload['added_out_tokens'] as int? ?? 0;
       _deltaInput += addedIn;
       _deltaOutput += addedOut;
       _updateTitle();
