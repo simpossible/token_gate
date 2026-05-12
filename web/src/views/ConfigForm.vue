@@ -65,17 +65,17 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createConfig, updateConfig, getConfig, getCompanies } from '../api/index.js'
+import { createConfig, updateConfig, getConfig } from '../api/index.js'
 
 const props = defineProps({
   configId: String,
-  editMode: Boolean
+  editMode: Boolean,
+  companies: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['back', 'saved'])
 
 const formRef = ref(null)
 const submitting = ref(false)
-const companies = ref([])
 const form = ref({
   name: '',
   url: 'https://api.anthropic.com',
@@ -90,25 +90,14 @@ const rules = {
 }
 
 const currentModels = computed(() => {
-  const found = companies.value.find(c => c.url === form.value.url)
+  const found = props.companies.find(c => c.url === form.value.url)
   return found ? found.models : []
 })
 
 function onUrlChange(val) {
-  const found = companies.value.find(c => c.url === val)
+  const found = props.companies.find(c => c.url === val)
   if (found && found.models.length > 0) {
     form.value.model = found.models[0]
-  }
-}
-
-async function loadCompanies() {
-  try {
-    const data = await getCompanies()
-    if (data && Array.isArray(data.list)) {
-      companies.value = data.list
-    }
-  } catch (e) {
-    // non-critical: fall back to empty list (user can still type custom URL/model)
   }
 }
 
@@ -146,7 +135,6 @@ async function submit() {
 }
 
 onMounted(async () => {
-  await loadCompanies()
   await loadConfig()
 })
 </script>

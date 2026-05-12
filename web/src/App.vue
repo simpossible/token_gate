@@ -21,6 +21,7 @@
         />
         <ConfigForm
           v-else-if="currentPage === 'create'"
+          :companies="companies"
           @back="currentPage = 'list'"
           @saved="onCreated"
         />
@@ -28,6 +29,7 @@
           v-else-if="currentPage === 'edit'"
           :config-id="selectedConfigId"
           :edit-mode="true"
+          :companies="companies"
           @back="openDetail(selectedConfigId)"
           @saved="onCreated"
         />
@@ -38,7 +40,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getConfigs, getAgents } from './api/index.js'
+import { getConfigs, getAgents, getCompanies } from './api/index.js'
 import ConfigList from './views/ConfigList.vue'
 import ConfigDetail from './views/ConfigDetail.vue'
 import ConfigForm from './views/ConfigForm.vue'
@@ -47,6 +49,7 @@ const currentPage = ref('list')
 const selectedConfigId = ref(null)
 const configs = ref([])
 const agents = ref([])
+const companies = ref([])
 
 async function loadConfigs() {
   configs.value = await getConfigs()
@@ -86,7 +89,8 @@ async function onCreated() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadConfigs(), loadAgents()])
+  const [, , companiesData] = await Promise.all([loadConfigs(), loadAgents(), getCompanies()])
+  if (companiesData?.list) companies.value = companiesData.list
 })
 
 // expose openEdit for child components
