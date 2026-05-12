@@ -328,8 +328,6 @@ class _InfoGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      ('ID', config.id),
-      ('Agent 类型', config.agentType),
       ('厂商', vendorLabel),
       ('API Key', config.apiKey),
       ('模型', config.model),
