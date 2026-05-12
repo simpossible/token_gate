@@ -25,6 +25,7 @@ import (
 	"token_gate/internal/latency"
 	"token_gate/internal/model"
 	"token_gate/internal/proxy"
+	"token_gate/internal/util"
 )
 
 func main() {
@@ -62,7 +63,7 @@ func main() {
 // --- path helpers ---
 
 func dataDir() string {
-	home, _ := os.UserHomeDir()
+	home := util.RealHomeDir
 	return filepath.Join(home, ".token_gate")
 }
 
@@ -245,10 +246,7 @@ func runDaemon() {
 }
 
 func startServers() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatalf("get home dir: %v", err)
-	}
+	home := util.RealHomeDir
 
 	dir := filepath.Join(home, ".token_gate")
 	dbPath := filepath.Join(dir, "token_gate.db")
@@ -339,7 +337,7 @@ func startServers() {
 }
 
 func readClaudeSettings() (apiKey, baseURL, modelStr string) {
-	home, _ := os.UserHomeDir()
+	home := util.RealHomeDir
 	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
 	if err != nil {
 		return
@@ -436,7 +434,7 @@ func restoreOrImportConfig(db *database.DB, cache *config.ActiveConfigCache, pro
 }
 
 func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
-	home, _ := os.UserHomeDir()
+	home := util.RealHomeDir
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	log.Printf("[MAIN] Checking for existing Claude Code config at: %s", settingsPath)
 

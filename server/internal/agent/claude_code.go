@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"token_gate/internal/model"
+	"token_gate/internal/util"
 )
 
 type ClaudeCodeProcessor struct {
@@ -28,14 +29,8 @@ func (p *ClaudeCodeProcessor) OnActivate(config *model.TokenConfig) error {
 
 	log.Printf("[AGENT] ClaudeCode OnActivate: config_id=%s, config_name=%s", config.ID, config.Name)
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Printf("[AGENT] ClaudeCode OnActivate error: get home dir: %v", err)
-		return fmt.Errorf("get home dir: %w", err)
-	}
-
+	home := util.RealHomeDir
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	log.Printf("[AGENT] ClaudeCode updating settings: %s", settingsPath)
 	if err := p.updateSettings(settingsPath, map[string]string{
 		"ANTHROPIC_BASE_URL":   "http://127.0.0.1:12121/claude_code",
 		"ANTHROPIC_API_KEY":    "placeholder",
@@ -55,14 +50,8 @@ func (p *ClaudeCodeProcessor) OnDeactivate(config *model.TokenConfig) error {
 
 	log.Printf("[AGENT] ClaudeCode OnDeactivate: config_id=%s, config_name=%s", config.ID, config.Name)
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Printf("[AGENT] ClaudeCode OnDeactivate error: get home dir: %v", err)
-		return fmt.Errorf("get home dir: %w", err)
-	}
-
+	home := util.RealHomeDir
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	log.Printf("[AGENT] ClaudeCode restoring settings: %s", settingsPath)
 	if err := p.restoreSettings(settingsPath, config); err != nil {
 		log.Printf("[AGENT] ClaudeCode OnDeactivate error: %v", err)
 		return err
