@@ -116,46 +116,40 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
           ),
           const SizedBox(height: 20),
 
-          // 2.2.3 Token chart
-          Row(
-            children: [
-              const Text(
-                'Token 用量',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-              ),
-              const Spacer(),
-              _ChartToggle(
-                isLine: _showLineChart,
-                onToggle: (v) => setState(() => _showLineChart = v),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 160,
+          // 2.2.3 Token chart card
+          _ChartCard(
+            title: 'Token 用量',
+            trailing: _SegmentedPill(
+              isLine: _showLineChart,
+              onToggle: (v) => setState(() => _showLineChart = v),
+            ),
+            legend: _showLineChart
+                ? const Row(children: [
+                    _LegendDot(color: Color(0xFF6366F1), label: '输入'),
+                    SizedBox(width: 12),
+                    _LegendDot(color: Color(0xFF10B981), label: '输出'),
+                    SizedBox(width: 12),
+                    _LegendDot(color: Color(0xFFF59E0B), label: '合计'),
+                  ])
+                : const Row(children: [
+                    _LegendDot(color: Color(0xFF6366F1), label: '合计'),
+                  ]),
             child: usagesAsync.when(
-              loading: () =>
-                  const Center(child: CircularProgressIndicator()),
+              loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(child: Text('$e', style: const TextStyle(fontSize: 12))),
-              data: (entries) => _TokenChart(
-                entries: entries,
-                isLine: _showLineChart,
-              ),
+              data: (entries) => _TokenChart(entries: entries, isLine: _showLineChart),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
 
-          // 2.2.4 Latency chart — reuses usagesAsync (each entry has latency_ms)
-          const Text(
-            '请求延迟',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 140,
+          // 2.2.4 Latency chart card
+          _ChartCard(
+            title: '请求延迟 TTFB',
+            legend: const Row(children: [
+              _LegendDot(color: Color(0xFFF59E0B), label: '延迟 (ms)'),
+            ]),
             child: usagesAsync.when(
-              loading: () =>
-                  const Center(child: CircularProgressIndicator()),
+              loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, st) => Center(child: Text('$e', style: const TextStyle(fontSize: 12))),
               data: (entries) => _LatencyChart(entries: entries),
             ),
@@ -335,63 +329,118 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _ChartToggle extends StatelessWidget {
-  final bool isLine;
-  final ValueChanged<bool> onToggle;
+// ── Chart card container ─────────────────────────────────────────────────────
 
-  const _ChartToggle({required this.isLine, required this.onToggle});
+class _ChartCard extends StatelessWidget {
+  final String title;
+  final Widget? trailing;
+  final Widget? legend;
+  final Widget child;
 
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _ToggleBtn(
-          icon: Icons.show_chart,
-          active: isLine,
-          onTap: () => onToggle(true),
-          tooltip: '折线图',
-        ),
-        const SizedBox(width: 4),
-        _ToggleBtn(
-          icon: Icons.bar_chart,
-          active: !isLine,
-          onTap: () => onToggle(false),
-          tooltip: '柱状图',
-        ),
-      ],
-    );
-  }
-}
-
-class _ToggleBtn extends StatelessWidget {
-  final IconData icon;
-  final bool active;
-  final VoidCallback onTap;
-  final String tooltip;
-
-  const _ToggleBtn({
-    required this.icon,
-    required this.active,
-    required this.onTap,
-    required this.tooltip,
+  const _ChartCard({
+    required this.title,
+    this.trailing,
+    this.legend,
+    required this.child,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(5),
-          decoration: BoxDecoration(
-            color: active ? const Color(0xFF6366F1) : Colors.transparent,
-            borderRadius: BorderRadius.circular(5),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 11, 10, 11),
+            child: Row(
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+                const Spacer(),
+                ?trailing,
+              ],
+            ),
           ),
-          child: Icon(
-            icon,
-            size: 16,
-            color: active ? Colors.white : Colors.grey[500],
+          const Divider(height: 1, thickness: 1, color: Color(0xFFE5E7EB)),
+          if (legend != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+              child: legend!,
+            ),
+          SizedBox(
+            height: 148,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 12, 8),
+              child: child,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Segmented pill toggle ─────────────────────────────────────────────────────
+
+class _SegmentedPill extends StatelessWidget {
+  final bool isLine;
+  final ValueChanged<bool> onToggle;
+
+  const _SegmentedPill({required this.isLine, required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _PillTab(label: '折线', active: isLine, onTap: () => onToggle(true)),
+          _PillTab(label: '柱状', active: !isLine, onTap: () => onToggle(false)),
+        ],
+      ),
+    );
+  }
+}
+
+class _PillTab extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _PillTab({required this.label, required this.active, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: active ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: active
+              ? [BoxShadow(color: Colors.black.withAlpha(18), blurRadius: 4, offset: const Offset(0, 1))]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+            color: active ? const Color(0xFF111827) : Colors.grey[500],
           ),
         ),
       ),
@@ -399,7 +448,38 @@ class _ToggleBtn extends StatelessWidget {
   }
 }
 
+// ── Legend dot ────────────────────────────────────────────────────────────────
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+      ],
+    );
+  }
+}
+
 // ── Charts ───────────────────────────────────────────────────────────────────
+
+String _fmtK(int n) {
+  if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
+  if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
+  return '$n';
+}
 
 class _TokenChart extends StatelessWidget {
   final List<UsageEntry> entries;
@@ -415,7 +495,6 @@ class _TokenChart extends StatelessWidget {
       );
     }
 
-    // Take last 20 points
     final data = entries.length > 20 ? entries.sublist(entries.length - 20) : entries;
 
     if (isLine) {
@@ -434,19 +513,38 @@ class _TokenChart extends StatelessWidget {
       final e = data[i];
       inputSpots.add(FlSpot(i.toDouble(), e.inputTokens.toDouble()));
       outputSpots.add(FlSpot(i.toDouble(), e.outputTokens.toDouble()));
-      totalSpots.add(
-          FlSpot(i.toDouble(), (e.inputTokens + e.outputTokens).toDouble()));
+      totalSpots.add(FlSpot(i.toDouble(), (e.inputTokens + e.outputTokens).toDouble()));
     }
 
+    const seriesNames = ['输入', '输出', '合计'];
+    const seriesColors = [Color(0xFF6366F1), Color(0xFF10B981), Color(0xFFF59E0B)];
+
     return LineChartData(
+      lineTouchData: LineTouchData(
+        handleBuiltInTouches: true,
+        touchTooltipData: LineTouchTooltipData(
+          getTooltipColor: (_) => Colors.white,
+          tooltipRoundedRadius: 8,
+          tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
+          tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          getTooltipItems: (spots) => spots.map((s) {
+            final idx = s.barIndex;
+            return LineTooltipItem(
+              '${seriesNames[idx]}: ${_fmtK(s.y.toInt())}',
+              TextStyle(
+                color: seriesColors[idx],
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            );
+          }).toList(),
+        ),
+      ),
       gridData: FlGridData(
         drawHorizontalLine: true,
         drawVerticalLine: false,
         horizontalInterval: null,
-        getDrawingHorizontalLine: (_) => FlLine(
-          color: Colors.black.withAlpha(15),
-          strokeWidth: 1,
-        ),
+        getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
       ),
       titlesData: const FlTitlesData(
         leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -470,22 +568,28 @@ class _TokenChart extends StatelessWidget {
       color: color,
       barWidth: 2,
       dotData: const FlDotData(show: false),
-      belowBarData: BarAreaData(
-        show: true,
-        color: color.withAlpha(20),
-      ),
+      belowBarData: BarAreaData(show: true, color: color.withAlpha(20)),
     );
   }
 
   BarChartData _buildBarData(List<UsageEntry> data) {
     return BarChartData(
+      barTouchData: BarTouchData(
+        touchTooltipData: BarTouchTooltipData(
+          getTooltipColor: (_) => Colors.white,
+          tooltipRoundedRadius: 8,
+          tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
+          tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem(
+            '合计: ${_fmtK(rod.toY.toInt())}',
+            const TextStyle(color: Color(0xFF6366F1), fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
       gridData: FlGridData(
         drawHorizontalLine: true,
         drawVerticalLine: false,
-        getDrawingHorizontalLine: (_) => FlLine(
-          color: Colors.black.withAlpha(15),
-          strokeWidth: 1,
-        ),
+        getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
       ),
       titlesData: const FlTitlesData(
         leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -526,9 +630,7 @@ class _LatencyChart extends StatelessWidget {
       );
     }
 
-    final data = withLatency.length > 30
-        ? withLatency.sublist(withLatency.length - 30)
-        : withLatency;
+    final data = withLatency.length > 30 ? withLatency.sublist(withLatency.length - 30) : withLatency;
     final spots = List.generate(
       data.length,
       (i) => FlSpot(i.toDouble(), data[i].latencyMs.toDouble()),
@@ -536,13 +638,23 @@ class _LatencyChart extends StatelessWidget {
 
     return LineChart(
       LineChartData(
+        lineTouchData: LineTouchData(
+          handleBuiltInTouches: true,
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipColor: (_) => Colors.white,
+            tooltipRoundedRadius: 8,
+            tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
+            tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
+              '${s.y.toInt()} ms',
+              const TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.w600),
+            )).toList(),
+          ),
+        ),
         gridData: FlGridData(
           drawHorizontalLine: true,
           drawVerticalLine: false,
-          getDrawingHorizontalLine: (_) => FlLine(
-            color: Colors.black.withAlpha(15),
-            strokeWidth: 1,
-          ),
+          getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
         ),
         titlesData: const FlTitlesData(
           leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -558,10 +670,7 @@ class _LatencyChart extends StatelessWidget {
             color: const Color(0xFFF59E0B),
             barWidth: 2,
             dotData: const FlDotData(show: false),
-            belowBarData: BarAreaData(
-              show: true,
-              color: const Color(0xFFF59E0B).withAlpha(25),
-            ),
+            belowBarData: BarAreaData(show: true, color: const Color(0xFFF59E0B).withAlpha(25)),
           ),
         ],
       ),
