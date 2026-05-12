@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,10 +24,7 @@ import (
 	"token_gate/internal/latency"
 	"token_gate/internal/model"
 	"token_gate/internal/proxy"
-	"token_gate/internal/web"
 )
-
-const webURL = "http://127.0.0.1:12123"
 
 func main() {
 	cmd := "start"
@@ -94,7 +90,7 @@ func readPID() (int, bool) {
 }
 
 func portListening() bool {
-	resp, err := http.Get(webURL)
+	resp, err := http.Get("http://127.0.0.1:12122/api/agents")
 	if err != nil {
 		return false
 	}
@@ -107,12 +103,10 @@ func portListening() bool {
 func cmdStart() {
 	if pid, ok := readPID(); ok {
 		fmt.Printf("Token Gate is already running (pid %d)\n", pid)
-		openBrowser(webURL)
 		return
 	}
 	if portListening() {
 		fmt.Println("Token Gate is already running (managed by brew services)")
-		openBrowser(webURL)
 		return
 	}
 
@@ -147,8 +141,6 @@ func cmdStart() {
 		os.Exit(1)
 	}
 
-	openBrowser(webURL)
-	fmt.Printf("Web: %s\n", webURL)
 	fmt.Printf("Logs: %s\n", logPath())
 }
 
@@ -186,7 +178,7 @@ func cmdStop() {
 
 func cmdShow() {
 	if portListening() {
-		openBrowser(webURL)
+		fmt.Println("Token Gate is running")
 		return
 	}
 	fmt.Println("Token Gate is not running, starting...")
@@ -196,31 +188,16 @@ func cmdShow() {
 func cmdStatus() {
 	if pid, ok := readPID(); ok {
 		fmt.Printf("running (pid %d)\n", pid)
-		fmt.Printf("Web:  %s\n", webURL)
+		fmt.Printf("API:  http://127.0.0.1:12122\n")
 		fmt.Printf("Logs: %s\n", logPath())
 		return
 	}
 	if portListening() {
 		fmt.Println("running (managed by brew services)")
-		fmt.Printf("Web: %s\n", webURL)
+		fmt.Printf("API: http://127.0.0.1:12122\n")
 		return
 	}
 	fmt.Println("stopped")
-}
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	default:
-		return
-	}
-	_ = cmd.Start()
 }
 
 // --- server startup ---
@@ -273,7 +250,6 @@ func startServers() {
 	}
 
 	dir := filepath.Join(home, ".token_gate")
-	webDir := filepath.Join(dir, "web")
 	dbPath := filepath.Join(dir, "token_gate.db")
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -290,16 +266,9 @@ func startServers() {
 		log.Fatalf("init schema: %v", err)
 	}
 
-	if err := os.MkdirAll(webDir, 0755); err != nil {
-		log.Fatalf("create web dir: %v", err)
-	}
-	if err := web.ExtractWebFiles(webDir); err != nil {
-		log.Printf("warning: extract web files: %v", err)
-	}
-
 	processors := []agent.AgentProcessor{
 		agent.NewClaudeCodeProcessor(),
-			agent.NewCodexProcessor(),
+		agent.NewCodexProcessor(),
 	}
 
 	cache := config.NewCache(db)
@@ -337,7 +306,6 @@ func startServers() {
 
 	proxyServer := &http.Server{Addr: "127.0.0.1:12121", Handler: proxyHandler}
 	apiServer := &http.Server{Addr: "127.0.0.1:12122", Handler: apiHandler.Routes()}
-	webServer := &http.Server{Addr: "127.0.0.1:12123", Handler: web.Handler()}
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
@@ -350,7 +318,6 @@ func startServers() {
 		defer cancel()
 		proxyServer.Shutdown(ctx)
 		apiServer.Shutdown(ctx)
-		webServer.Shutdown(ctx)
 		log.Println("[MAIN] Shutdown complete")
 	}()
 
@@ -361,17 +328,10 @@ func startServers() {
 		}
 	}()
 
-	go func() {
-		log.Println("[SERVER] Config API on http://127.0.0.1:12122")
-		if err := apiServer.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatalf("api server: %v", err)
-		}
-	}()
-
-	log.Println("[SERVER] Web GUI on http://127.0.0.1:12123")
+	log.Println("[SERVER] Config API on http://127.0.0.1:12122")
 	log.Println("=== Token Gate Ready ===")
-	if err := webServer.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatalf("web server: %v", err)
+	if err := apiServer.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("api server: %v", err)
 	}
 }
 

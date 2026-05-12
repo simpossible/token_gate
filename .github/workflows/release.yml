@@ -18,21 +18,6 @@ jobs:
         with:
           go-version-file: server/go.mod
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Build frontend
-        run: |
-          cd web
-          npm ci
-          npm run build
-
-      - name: Prepare embedded assets
-        run: |
-          mkdir -p server/internal/web/dist
-          cp -r web/dist/ server/internal/web/dist/
-
       - name: Build binaries
         run: |
           cd server

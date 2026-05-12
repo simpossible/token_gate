@@ -67,6 +67,7 @@ type UsageResponse struct {
 	TotalInputTokens  int                    `json:"total_input_tokens"`
 	TotalOutputTokens int                    `json:"total_output_tokens"`
 	RecordsCount      int                    `json:"records_count"`
+	AvgLatencyMs      float64                `json:"avg_latency_ms"`
 	ByAgent           map[string]*AgentUsage `json:"by_agent"`
 	DailyUsage        []DailyUsage           `json:"daily_usage"`
 	LatestCreatedAtTs int64                  `json:"latest_created_at_ts,omitempty"`

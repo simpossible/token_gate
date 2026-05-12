@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Token Gate is a local proxy gateway that manages multiple Claude API keys for AI coding tools (Claude Code, Cursor, etc.). It intercepts requests, injects the active API key and model, records token usage, and exposes a management UI.
 
 **Two delivery modes (both ship from this repo):**
-- **Go binary (`server/`)** — the daemon itself: API proxy + REST API + embedded Vue web UI. Distributed via Homebrew.
+- **Go binary (`server/`)** — the daemon itself: API proxy + REST API. Distributed via Homebrew.
 - **Flutter desktop app (`app/`)** — native macOS/Windows/Linux app that embeds the Go binary, provides an app-native UI, and shows a system tray with real-time token counts.
 
 ## Release Process
@@ -35,7 +35,7 @@ The script does everything in order:
 
 **Common pitfalls:**
 - Never use `gh release create` locally — the GitHub Actions workflow handles the Release. Local builds produce different SHA256s than CI builds.
-- Run the script from the **project root** (where `server/` and `web/` live), not from inside `server/`.
+- Run the script from the **project root** (where `server/` lives), not from inside `server/`.
 - The formula in `homebrew/token_gate.rb` is not the one Homebrew uses — it's a reference copy. The live formula is in the `homebrew-tap` repo (`git@github.com:simpossible/homebrew-tap.git`), updated automatically by the script.
 - After release, users install with:
   ```bash
@@ -46,38 +46,26 @@ The script does everything in order:
 ## Build Commands
 
 ```bash
-# Full build (frontend + backend Go binary)
-cd server && make build          # builds web first, then embeds into Go binary → ./token_gate
+# Build Go binary
+cd server && make build          # → ./token_gate
 
-# Frontend only
-cd web && npm install && npm run build   # outputs to web/dist/
-
-# Backend only (requires web/dist/ to exist)
-cd server && go build -o token_gate .
-
-# Run the server (starts all three ports)
+# Run the server (starts both ports)
 ./server/token_gate
-
-# Frontend dev server (proxies /api → 127.0.0.1:12122)
-cd web && npm run dev            # http://localhost:5173
 
 # Flutter desktop app (compiles Go binary first, then Flutter)
 cd server && make app            # → app/build/macos/Build/Products/Release/app.app
 ```
 
-The Makefile copies `web/dist/` into `server/internal/web/dist/` before compiling so Go's `//go:embed dist/*` can pick it up.
-
 `make app` does: `make build` → copy `token_gate` binary to `app/assets/bin/` → `flutter build macos`.
 
-## Three-Port Architecture
+## Two-Port Architecture
 
 | Port  | Role              | Handler            |
 |-------|-------------------|--------------------|
 | 12121 | API proxy         | `internal/proxy`   |
 | 12122 | Config REST API   | `internal/api`     |
-| 12123 | Web GUI (static)  | `internal/web`     |
 
-All three ports bind to `127.0.0.1` only.
+Both ports bind to `127.0.0.1` only.
 
 ## Request Flow Through the Proxy (Port 12121)
 
@@ -142,34 +130,17 @@ SQLite at `~/.token_gate/token_gate.db`. Two tables (as of release_2.0):
 
 **Schema migration**: On startup `InitSchema` runs `ALTER TABLE token_config ADD COLUMN agent_type` / `is_active` (idempotent), then calls `migrateFromValidConfig()` which reads any legacy `valid_config` rows, writes `agent_type`+`is_active` into `token_config`, and drops the old table. Safe to run on both old and fresh databases.
 
-## Frontend Architecture (Web — `web/`)
-
-Vue 3 + Composition API, Element Plus, ECharts (raw `echarts/core`, not vue-echarts). No router — page state managed in `App.vue` via `currentPage` ref (`'list' | 'detail' | 'create' | 'edit'`).
-
-`web/src/api/index.js` uses empty `baseURL` in dev mode (goes through Vite's `/api` proxy to port 12122) and `http://127.0.0.1:12122` in production.
-
-Edit switching from `ConfigDetail` → `ConfigForm` uses `window.__openEdit(id)` (a hack to cross component boundaries without a router).
-
-`ConfigDetail.vue` uses raw `echarts.init(domRef)` — the chart instance is created in `renderChart()`, re-initialized on tab change, and disposed in `onUnmounted`.
-
-**Agent type tabs**: `App.vue` renders pill tabs in the header for each registered agent type (`selectedAgentType` ref). Switching tabs calls `getConfigs(agentType)`, filtering the list server-side. The selected agent type is passed down to `ConfigList`, `ConfigForm`, and `ConfigDetail` as a prop.
-
-**Config create flow**: `ConfigForm` shows an `agent_type` selector (required) on create, pre-filled from `selectedAgentType`. On edit the field is read-only (agent type cannot change). `updateConfig` strips `agent_type` from the payload since the backend ignores it on update.
-
-**Activate/deactivate**: Since `agent_type` is stored on the config, the API endpoints `POST /api/configs/:id/activate` and `POST /api/configs/:id/deactivate` no longer require a request body — the backend reads `agent_type` from the config record directly.
-
 ## Flutter Desktop App Architecture (`app/`)
 
 ### Overall relationship
 
 ```
-以前:  [Go daemon]  内嵌 web/dist/ → Port 12123 提供 Web UI
-现在:  [Flutter App] 内嵌 token_gate 二进制 (app/assets/bin/token_gate)
+[Flutter App] 内嵌 token_gate 二进制 (app/assets/bin/token_gate)
               ↓ 启动时检测 :12122 是否在线，不在线则释放二进制到
                 ~/.token_gate/token_gate 并执行（Go 自身 daemonize）
         [Go daemon]  独立运行，与 Flutter 无父子关系
               ↑
-        Flutter 通过 HTTP :12122 调用全部 REST API（与 Web 前端完全等价）
+        Flutter 通过 HTTP :12122 调用全部 REST API
 ```
 
 **关键原则：**
@@ -269,7 +240,7 @@ main() → windowManager.ensureInitialized() → 固定窗口参数
 ### macOS 特殊配置
 
 - **Entitlements（非 App Store 分发）**：`com.apple.security.network.client`（调 127.0.0.1）+ `temporary-exception.files.home-relative-path.read-write` 允许读写 `~/.token_gate/`
-- **不上 App Store 原因**：沙盒会阻断写 `~/.claude/settings.json` 和绑定固定端口（12121/12122/12123）
+- **不上 App Store 原因**：沙盒会阻断写 `~/.claude/settings.json` 和绑定固定端口（12121/12122）
 
 ## Company/Vendor List (`internal/company`)
 
@@ -301,9 +272,7 @@ Edit `server/internal/company/company.json` and commit to master. Existing runni
 - **`agent_type` is immutable after creation**: The backend validates `agent_type` on create (must be a registered processor type) but ignores it on update. The frontend enforces this with a disabled field in edit mode.
 - **One active config per agent type**: `ActivateTokenConfig` atomically deactivates any existing active config for the same `agent_type` before activating the new one — both in DB (transaction) and via `OnDeactivate`/`OnActivate` processor hooks.
 - **`GET /api/configs` vs `GET /api/configs/:id`**: Both return plain `TokenConfig` (with `agent_type` and `is_active`). The list endpoint accepts `?agent_type=` to filter. `ConfigWithAgents` and `active_agents` no longer exist.
-- **`@updated` propagation**: When `ConfigDetail` emits `updated`, `App.vue` must reload both configs and agents to keep the agent switch state consistent.
-- **Web embed requires a build first**: `server/internal/web/dist/` must exist before `go build`. Running `go build` without it will fail due to the `//go:embed dist/*` directive.
-- **CORS**: The API server (port 12122) returns `Access-Control-Allow-Origin: *` headers. Port 12123 (web) and port 12122 (API) are different origins so this is required even in production.
+- **CORS**: The API server (port 12122) returns `Access-Control-Allow-Origin: *` headers for cross-origin requests.
 - **Flutter `assets/bin/token_gate` must exist before `flutter build`**: `make app` handles this automatically, but running `flutter build macos` directly without the binary will fail at runtime (not compile time — `rootBundle.load` throws at asset extraction).
 - **Flutter `DropdownButtonFormField.value` is deprecated in Flutter 3.33+**: use `initialValue` instead.
 - **`ConfigsNotifier` reacts to `selectedAgentTypeProvider`**: because `build()` calls `ref.watch(selectedAgentTypeProvider)`, switching agent type automatically triggers a full list reload — no manual wiring needed.
