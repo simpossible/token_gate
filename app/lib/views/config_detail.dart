@@ -109,8 +109,10 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
   void _subscribeEvents() {
     final eventService = ref.read(eventServiceProvider);
     final configId = widget.config.id;
+    debugPrint('[ConfigDetail] subscribing events: configId=$configId');
     final stream = eventService.connect('event', configId: configId);
     _eventSubscription = stream.listen((msg) {
+      debugPrint('[ConfigDetail] event received: type=${msg.type}, data=${msg.data}');
       if (msg.type == 'usage_new') {
         ref.invalidate(usageStatsProvider(configId));
         ref.invalidate(usagesProvider(configId));
@@ -120,6 +122,7 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
 
   @override
   void dispose() {
+    debugPrint('[ConfigDetail] dispose: configId=${widget.config.id}');
     _eventSubscription?.cancel();
     final configId = widget.config.id;
     ref.read(eventServiceProvider).disconnect('event_$configId');

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 const _base = 'http://127.0.0.1:12122';
@@ -36,17 +37,20 @@ class EventConnection {
       url += '&config_id=$configId';
     }
 
+    debugPrint('[EventService] connecting to $url');
     _client = http.Client();
     final request = http.Request('GET', Uri.parse(url));
 
     _client!.send(request).then((streamedResponse) {
+      debugPrint('[EventService] SSE connected: status=${streamedResponse.statusCode}, connType=$connType, configId=$configId');
       final stream = streamedResponse.stream;
       String buffer = '';
       String currentEvent = '';
 
       _subscription = stream.listen(
         (data) {
-          buffer += utf8.decode(data, allowMalformed: true);
+          final text = utf8.decode(data, allowMalformed: true);
+          buffer += text;
           final lines = buffer.split('\n');
           buffer = lines.removeLast(); // keep incomplete line
 
@@ -55,12 +59,15 @@ class EventConnection {
               currentEvent = line.substring(7).trim();
             } else if (line.startsWith('data: ')) {
               final dataStr = line.substring(6);
+              debugPrint('[EventService] SSE event=$currentEvent data=$dataStr');
               try {
                 final json = jsonDecode(dataStr) as Map<String, dynamic>;
                 if (currentEvent.isNotEmpty && _controller != null && !_controller!.isClosed) {
                   _controller!.add(EventMessage(currentEvent, json));
                 }
-              } catch (_) {}
+              } catch (e) {
+                debugPrint('[EventService] SSE parse error: $e');
+              }
               currentEvent = '';
             } else if (line.trim().isEmpty) {
               currentEvent = '';
@@ -68,13 +75,16 @@ class EventConnection {
           }
         },
         onError: (e) {
+          debugPrint('[EventService] SSE stream error: $e');
           _scheduleReconnect();
         },
         onDone: () {
+          debugPrint('[EventService] SSE stream done (closed by server), reconnecting...');
           _scheduleReconnect();
         },
       );
     }).catchError((e) {
+      debugPrint('[EventService] SSE connection failed: $e');
       _scheduleReconnect();
     });
   }
@@ -82,6 +92,7 @@ class EventConnection {
   void _scheduleReconnect() {
     if (_disposed) return;
     _reconnectTimer?.cancel();
+    debugPrint('[EventService] reconnecting in 3s... (connType=$connType, configId=$configId)');
     _reconnectTimer = Timer(const Duration(seconds: 3), () {
       _cleanup();
       _doConnect();
@@ -96,6 +107,7 @@ class EventConnection {
   }
 
   void dispose() {
+    debugPrint('[EventService] disposing connection: connType=$connType, configId=$configId');
     _disposed = true;
     _reconnectTimer?.cancel();
     _cleanup();
@@ -108,6 +120,7 @@ class EventService {
 
   Stream<EventMessage> connect(String connType, {String? configId}) {
     final key = '${connType}_${configId ?? ""}';
+    debugPrint('[EventService] connect() called: key=$key');
     disconnect(key);
 
     final conn = EventConnection(connType: connType, configId: configId);
@@ -117,7 +130,10 @@ class EventService {
 
   void disconnect(String key) {
     final existing = _connections.remove(key);
-    existing?.dispose();
+    if (existing != null) {
+      debugPrint('[EventService] disconnecting: key=$key');
+      existing.dispose();
+    }
   }
 
   void disconnectAll() {

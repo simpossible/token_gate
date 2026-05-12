@@ -29,14 +29,25 @@ class _LogPanelState extends State<LogPanel> {
   @override
   void initState() {
     super.initState();
+    debugPrint('[LogPanel] initState: configId=${widget.configId}, configName=${widget.configName}');
     final stream = widget.eventService.connect('log', configId: widget.configId);
-    _subscription = stream.listen(_onEvent);
+    _subscription = stream.listen((msg) {
+      debugPrint('[LogPanel] received event: type=${msg.type}, data=${msg.data}');
+      _onEvent(msg);
+    });
   }
+
+  static const int _maxLineLen = 2000;
 
   void _onEvent(EventMessage msg) {
     if (msg.type == 'gate_log') {
-      final message = msg.data['message'] as String? ?? '';
+      final payload = msg.data['payload'] as Map<String, dynamic>?;
+      var message = payload?['message'] as String? ?? '';
       if (message.isEmpty) return;
+      if (message.length > _maxLineLen) {
+        message = '${message.substring(0, _maxLineLen)}... (${message.length} chars)';
+      }
+      debugPrint('[LogPanel] gate_log message: ${message.substring(0, message.length > 100 ? 100 : message.length)}');
       setState(() {
         _logs.add(message);
       });
@@ -129,7 +140,7 @@ class _LogPanelState extends State<LogPanel> {
                       final isRequest = log.contains('→');
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                        child: Text(
+                        child: SelectableText(
                           log,
                           style: TextStyle(
                             fontFamily: 'monospace',

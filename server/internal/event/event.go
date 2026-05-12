@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"log"
 	"sync"
 )
 
@@ -46,7 +47,9 @@ func (b *EventBus) Subscribe(connType, configID string) *Subscriber {
 	}
 	b.mu.Lock()
 	b.subscribers[connType] = append(b.subscribers[connType], sub)
+	count := len(b.subscribers[connType])
 	b.mu.Unlock()
+	log.Printf("[EVENT] Subscribe: connType=%s, configID=%s, total_subscribers=%d", connType, configID, count)
 	return sub
 }
 
@@ -59,6 +62,7 @@ func (b *EventBus) Unsubscribe(sub *Subscriber) {
 		if s == sub {
 			b.subscribers[sub.connType] = append(subs[:i], subs[i+1:]...)
 			close(sub.ch)
+			log.Printf("[EVENT] Unsubscribe: connType=%s, configID=%s, remaining=%d", sub.connType, sub.configID, len(b.subscribers[sub.connType]))
 			return
 		}
 	}
@@ -78,17 +82,21 @@ func (b *EventBus) HasSubscribers(connType, configID string) bool {
 
 func (b *EventBus) Publish(event Event) {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	for _, sub := range b.subscribers[event.ConnType] {
+	subs := b.subscribers[event.ConnType]
+	matched := 0
+	for _, sub := range subs {
 		if sub.configID != "" && sub.configID != event.ConfigID && event.ConfigID != "" {
 			continue
 		}
+		matched++
 		select {
 		case sub.ch <- event:
 		default:
+			log.Printf("[EVENT] Publish DROPPED: connType=%s, eventType=%s, configID=%s (channel full)", event.ConnType, event.Type, event.ConfigID)
 		}
 	}
+	b.mu.RUnlock()
+	log.Printf("[EVENT] Publish: type=%s, connType=%s, configID=%s, matched=%d/%d", event.Type, event.ConnType, event.ConfigID, matched, len(subs))
 }
 
 func (s *Subscriber) Channel() <-chan Event {

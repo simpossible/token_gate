@@ -29,6 +29,17 @@ func NewProxy(cache *config.ActiveConfigCache, db *database.DB, latencyCache *la
 	return &Proxy{cache: cache, db: db, latencyCache: latencyCache, eventBus: eventBus, debug: newDebugLogger()}
 }
 
+func (p *Proxy) publishLog(configID string, msg string) {
+	if p.eventBus.HasSubscribers("log", configID) {
+		p.eventBus.Publish(event.Event{
+			ConnType: "log",
+			Type:     "gate_log",
+			ConfigID: configID,
+			Payload:  map[string]string{"message": msg},
+		})
+	}
+}
+
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	reqID := shortID()
@@ -91,15 +102,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[PROXY] forwarding to: %s", targetURL)
 
-	// Publish gate_log: request received
+	// Publish gate_log: request summary + body
 	if p.eventBus.HasSubscribers("log", tc.ID) {
 		msg := fmt.Sprintf("%s → %s %s model=%s (%d bytes)", time.Now().Format("15:04:05"), r.Method, realPath, tc.Model, len(bodyBytes))
-		p.eventBus.Publish(event.Event{
-			ConnType: "log",
-			Type:     "gate_log",
-			ConfigID: tc.ID,
-			Payload:  map[string]string{"message": msg},
-		})
+		p.publishLog(tc.ID, msg)
+
+		if len(bodyBytes) > 0 {
+			var pretty bytes.Buffer
+			if json.Indent(&pretty, bodyBytes, "", "  ") == nil {
+				p.publishLog(tc.ID, pretty.String())
+			}
+		}
 	}
 
 	// Create forwarded request
@@ -158,6 +171,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		latencyMs := time.Since(start).Milliseconds()
 		log.Printf("[PROXY] request complete: agent=%s, path=%s, duration=%dms, status=%d", agentType, realPath, latencyMs, resp.StatusCode)
 		p.debug.logResponseBody(reqID, body)
+
+		// Publish gate_log: non-SSE response body + summary
+		if p.eventBus.HasSubscribers("log", tc.ID) {
+			if len(body) > 0 {
+				var pretty bytes.Buffer
+				if json.Indent(&pretty, body, "", "  ") == nil {
+					p.publishLog(tc.ID, pretty.String())
+				}
+			}
+		}
+
 		go p.recordUsage(body, tc.ID, agentType, latencyMs)
 	}
 }
@@ -170,6 +194,7 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 	var lastUsageInput, lastUsageOutput int
 	var ttfbMs int64
 	firstLine := true
+	hasLogSubscriber := p.eventBus.HasSubscribers("log", tokenID)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -184,6 +209,14 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 			flusher.Flush()
 		}
 		p.debug.logSSELine(line)
+
+		// Publish gate_log: each SSE data line
+		if hasLogSubscriber && strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			if data != "[DONE]" {
+				p.publishLog(tokenID, data)
+			}
+		}
 
 		// Parse usage from SSE events
 		if strings.HasPrefix(line, "data: ") {
@@ -226,15 +259,10 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 		}()
 	}
 
-	// Publish gate_log: SSE response complete
-	if p.eventBus.HasSubscribers("log", tokenID) {
+	// Publish gate_log: SSE response summary
+	if hasLogSubscriber {
 		msg := fmt.Sprintf("%s ← ↑%d ↓%d %dms streaming", time.Now().Format("15:04:05"), lastUsageInput, lastUsageOutput, ttfbMs)
-		p.eventBus.Publish(event.Event{
-			ConnType: "log",
-			Type:     "gate_log",
-			ConfigID: tokenID,
-			Payload:  map[string]string{"message": msg},
-		})
+		p.publishLog(tokenID, msg)
 	}
 
 	log.Printf("[PROXY] SSE stream complete: agent=%s, ttfb=%dms, input=%d, output=%d", agentType, ttfbMs, lastUsageInput, lastUsageOutput)
@@ -268,21 +296,13 @@ func (p *Proxy) recordUsage(body []byte, tokenID, agentType string, latencyMs in
 		p.latencyCache.Set(tokenID, latencyMs)
 		p.publishUsageEvents(tokenID, latencyMs, inputTokens, outputTokens, false)
 
-		// Publish gate_log: non-SSE response complete
-		if p.eventBus.HasSubscribers("log", tokenID) {
-			msg := fmt.Sprintf("%s ← ↑%d ↓%d %dms", time.Now().Format("15:04:05"), inputTokens, outputTokens, latencyMs)
-			p.eventBus.Publish(event.Event{
-				ConnType: "log",
-				Type:     "gate_log",
-				ConfigID: tokenID,
-				Payload:  map[string]string{"message": msg},
-			})
-		}
+		// Publish gate_log: non-SSE response summary
+		msg := fmt.Sprintf("%s ← ↑%d ↓%d %dms", time.Now().Format("15:04:05"), inputTokens, outputTokens, latencyMs)
+		p.publishLog(tokenID, msg)
 	}
 }
 
 func (p *Proxy) publishUsageEvents(tokenID string, latencyMs int64, inputTokens, outputTokens int, isStreaming bool) {
-	// usage_new: per-config
 	if p.eventBus.HasSubscribers("event", tokenID) {
 		p.eventBus.Publish(event.Event{
 			ConnType: "event",
@@ -296,7 +316,6 @@ func (p *Proxy) publishUsageEvents(tokenID string, latencyMs int64, inputTokens,
 		})
 	}
 
-	// total_token_change: global
 	if p.eventBus.HasSubscribers("event", "") {
 		p.eventBus.Publish(event.Event{
 			ConnType: "event",
