@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../models/agent.dart';
 import '../models/token_config.dart';
 import '../providers/providers.dart';
 import 'config_detail.dart';
@@ -229,35 +230,56 @@ class _TopBar extends StatelessWidget {
 
             // Agent type selector
             agentsAsync.when(
-              loading: () => const SizedBox(width: 140),
-              error: (e, st) => const SizedBox(width: 140),
+              loading: () => const SizedBox(width: 100),
+              error: (e, st) => const SizedBox(width: 100),
               data: (agents) {
-                final agentList = agents as List;
-                return Container(
-                  height: 32,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF3F4F6),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: selectedAgentType,
-                      icon: const Icon(Icons.expand_more, size: 16),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF374151),
-                      ),
-                      items: agentList
-                          .map((a) => DropdownMenuItem<String>(
-                                value: a.type as String,
-                                child: Text(a.label as String),
-                              ))
-                          .toList(),
-                      onChanged: (v) {
-                        if (v != null) onAgentChanged(v);
-                      },
+                final agentList = agents as List<Agent>;
+                final selected = agentList.firstWhere(
+                  (a) => a.type == selectedAgentType,
+                  orElse: () => agentList.first,
+                );
+                return PopupMenuButton<String>(
+                  position: PopupMenuPosition.under,
+                  offset: const Offset(0, 4),
+                  constraints: const BoxConstraints(minWidth: 120),
+                  onSelected: onAgentChanged,
+                  itemBuilder: (_) => agentList
+                      .map((a) => PopupMenuItem<String>(
+                            value: a.type,
+                            height: 32,
+                            child: Text(
+                              a.label,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: a.type == selectedAgentType
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: const Color(0xFF374151),
+                              ),
+                            ),
+                          ))
+                      .toList(),
+                  child: Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selected.label,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF374151),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.expand_more, size: 16, color: Color(0xFF9CA3AF)),
+                      ],
                     ),
                   ),
                 );
