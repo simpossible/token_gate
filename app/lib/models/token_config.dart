@@ -1,5 +1,5 @@
 class TokenConfig {
-  final int id;
+  final String id;
   final String name;
   final String apiKey;
   final String url;
@@ -21,14 +21,14 @@ class TokenConfig {
 
   factory TokenConfig.fromJson(Map<String, dynamic> json) {
     return TokenConfig(
-      id: json['id'] as int,
+      id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       apiKey: json['api_key'] as String? ?? '',
       url: json['url'] as String? ?? '',
       model: json['model'] as String? ?? '',
       agentType: json['agent_type'] as String? ?? '',
-      isActive: (json['is_active'] as int? ?? 0) == 1,
-      createdAt: json['created_at'] as String? ?? '',
+      isActive: json['is_active'] as bool? ?? false,
+      createdAt: json['created_at']?.toString() ?? '',
     );
   }
 
@@ -41,7 +41,7 @@ class TokenConfig {
       };
 
   TokenConfig copyWith({
-    int? id,
+    String? id,
     String? name,
     String? apiKey,
     String? url,

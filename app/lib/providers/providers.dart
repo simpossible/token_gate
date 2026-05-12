@@ -26,7 +26,7 @@ final trayServiceProvider = Provider<TrayService>(
 
 final selectedAgentTypeProvider = StateProvider<String>((ref) => 'claude_code');
 
-final selectedConfigIdProvider = StateProvider<int?>((ref) => null);
+final selectedConfigIdProvider = StateProvider<String?>((ref) => null);
 
 // ── Agents ─────────────────────────────────────────────────────────────────
 
@@ -51,17 +51,17 @@ class ConfigsNotifier extends AsyncNotifier<List<TokenConfig>> {
     );
   }
 
-  Future<void> activate(int id) async {
+  Future<void> activate(String id) async {
     await ref.read(apiServiceProvider).activateConfig(id);
     await reload();
   }
 
-  Future<void> deactivate(int id) async {
+  Future<void> deactivate(String id) async {
     await ref.read(apiServiceProvider).deactivateConfig(id);
     await reload();
   }
 
-  Future<void> delete(int id) async {
+  Future<void> delete(String id) async {
     await ref.read(apiServiceProvider).deleteConfig(id);
     ref.read(selectedConfigIdProvider.notifier).state = null;
     await reload();
@@ -75,22 +75,22 @@ final configsProvider =
 // ── Usage stats ─────────────────────────────────────────────────────────────
 
 final usageStatsProvider =
-    FutureProvider.family<UsageStats, int>((ref, configId) async {
+    FutureProvider.family<UsageStats, String>((ref, configId) async {
   return ref.read(apiServiceProvider).getUsageStats(configId);
 });
 
-// ── Usage entries (chart data) ──────────────────────────────────────────────
+// ── Usage entries (drives both token chart and latency chart) ───────────────
 
 final usagesProvider =
-    FutureProvider.family<List<UsageEntry>, int>((ref, configId) async {
-  return ref.read(apiServiceProvider).getUsages(configId: configId);
+    FutureProvider.family<List<UsageEntry>, String>((ref, configId) async {
+  return ref.read(apiServiceProvider).getUsages(configId);
 });
 
-// ── Latency ─────────────────────────────────────────────────────────────────
+// ── Latest latency (single cached value, not historical list) ───────────────
 
 final latencyProvider =
-    FutureProvider.family<List<LatencyEntry>, int>((ref, configId) async {
-  return ref.read(apiServiceProvider).getLatestLatency();
+    FutureProvider.family<LatestLatencyResponse, String>((ref, configId) async {
+  return ref.read(apiServiceProvider).getLatestLatency(configId);
 });
 
 // ── Companies ────────────────────────────────────────────────────────────────

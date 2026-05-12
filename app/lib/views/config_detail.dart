@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../models/latency_entry.dart';
 import '../models/token_config.dart';
 import '../models/usage_entry.dart';
 import '../models/usage_stats.dart';
@@ -33,7 +32,6 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
     final config = widget.config;
     final statsAsync = ref.watch(usageStatsProvider(config.id));
     final usagesAsync = ref.watch(usagesProvider(config.id));
-    final latencyAsync = ref.watch(latencyProvider(config.id));
     final companies = ref.watch(companiesProvider).valueOrNull ?? [];
 
     String vendorLabel;
@@ -138,7 +136,7 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
           ),
           const SizedBox(height: 20),
 
-          // 2.2.4 Latency chart
+          // 2.2.4 Latency chart — reuses usagesAsync (each entry has latency_ms)
           const Text(
             '请求延迟',
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
@@ -146,10 +144,10 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
           const SizedBox(height: 8),
           SizedBox(
             height: 140,
-            child: latencyAsync.when(
+            child: usagesAsync.when(
               loading: () =>
                   const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('$e', style: const TextStyle(fontSize: 12))),
+              error: (e, st) => Center(child: Text('$e', style: const TextStyle(fontSize: 12))),
               data: (entries) => _LatencyChart(entries: entries),
             ),
           ),
@@ -195,7 +193,7 @@ class _InfoGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      ('ID', '${config.id}'),
+      ('ID', config.id),
       ('Agent 类型', config.agentType),
       ('厂商', vendorLabel),
       ('API Key', config.apiKey),
@@ -268,7 +266,6 @@ class _StatsRow extends StatelessWidget {
       ('请求数', '${stats.requests}'),
       ('输入 Tokens', _fmt(stats.inputTokens)),
       ('输出 Tokens', _fmt(stats.outputTokens)),
-      ('平均延迟', '${stats.avgLatencyMs.toStringAsFixed(0)} ms'),
     ];
 
     return Row(
@@ -501,22 +498,25 @@ class _TokenChart extends StatelessWidget {
 }
 
 class _LatencyChart extends StatelessWidget {
-  final List<LatencyEntry> entries;
+  final List<UsageEntry> entries;
 
   const _LatencyChart({required this.entries});
 
   @override
   Widget build(BuildContext context) {
-    if (entries.isEmpty) {
+    final withLatency = entries.where((e) => e.latencyMs > 0).toList();
+    if (withLatency.isEmpty) {
       return const Center(
         child: Text('暂无数据', style: TextStyle(color: Colors.grey, fontSize: 12)),
       );
     }
 
-    final data = entries.length > 30 ? entries.sublist(entries.length - 30) : entries;
+    final data = withLatency.length > 30
+        ? withLatency.sublist(withLatency.length - 30)
+        : withLatency;
     final spots = List.generate(
       data.length,
-      (i) => FlSpot(i.toDouble(), data[i].ttfbMs.toDouble()),
+      (i) => FlSpot(i.toDouble(), data[i].latencyMs.toDouble()),
     );
 
     return LineChart(

@@ -1,16 +1,19 @@
-class LatencyEntry {
-  final int ttfbMs;
-  final int createdAtTs;
+class LatestLatencyResponse {
+  final String tokenId;
+  final int latestLatencyMs;
+  final bool hasData;
 
-  const LatencyEntry({required this.ttfbMs, required this.createdAtTs});
+  const LatestLatencyResponse({
+    required this.tokenId,
+    required this.latestLatencyMs,
+    required this.hasData,
+  });
 
-  factory LatencyEntry.fromJson(Map<String, dynamic> json) {
-    return LatencyEntry(
-      ttfbMs: json['ttfb_ms'] as int? ?? 0,
-      createdAtTs: json['created_at_ts'] as int? ?? 0,
+  factory LatestLatencyResponse.fromJson(Map<String, dynamic> json) {
+    return LatestLatencyResponse(
+      tokenId: json['token_id'] as String? ?? '',
+      latestLatencyMs: (json['latest_latency_ms'] as num?)?.toInt() ?? 0,
+      hasData: json['has_data'] as bool? ?? false,
     );
   }
-
-  DateTime get createdAt =>
-      DateTime.fromMillisecondsSinceEpoch(createdAtTs);
 }

@@ -22,20 +22,8 @@ Future<Map<String, dynamic>> _get(String path) async {
   final res = await http
       .get(Uri.parse('$_base$path'))
       .timeout(const Duration(seconds: 10));
-  if (res.statusCode >= 400) {
-    throw ApiException(res.statusCode, res.body);
-  }
+  if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
   return jsonDecode(res.body) as Map<String, dynamic>;
-}
-
-Future<List<dynamic>> _getList(String path) async {
-  final res = await http
-      .get(Uri.parse('$_base$path'))
-      .timeout(const Duration(seconds: 10));
-  if (res.statusCode >= 400) {
-    throw ApiException(res.statusCode, res.body);
-  }
-  return jsonDecode(res.body) as List<dynamic>;
 }
 
 Future<Map<String, dynamic>> _post(String path,
@@ -47,9 +35,7 @@ Future<Map<String, dynamic>> _post(String path,
         body: body != null ? jsonEncode(body) : null,
       )
       .timeout(const Duration(seconds: 10));
-  if (res.statusCode >= 400) {
-    throw ApiException(res.statusCode, res.body);
-  }
+  if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
   if (res.body.isEmpty) return {};
   return jsonDecode(res.body) as Map<String, dynamic>;
 }
@@ -63,9 +49,7 @@ Future<Map<String, dynamic>> _put(
         body: jsonEncode(body),
       )
       .timeout(const Duration(seconds: 10));
-  if (res.statusCode >= 400) {
-    throw ApiException(res.statusCode, res.body);
-  }
+  if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
   return jsonDecode(res.body) as Map<String, dynamic>;
 }
 
@@ -73,13 +57,16 @@ Future<void> _delete(String path) async {
   final res = await http
       .delete(Uri.parse('$_base$path'))
       .timeout(const Duration(seconds: 10));
-  if (res.statusCode >= 400) {
-    throw ApiException(res.statusCode, res.body);
-  }
+  if (res.statusCode >= 400) throw ApiException(res.statusCode, res.body);
+}
+
+List<T> _extractList<T>(
+    Map<String, dynamic> json, String key, T Function(Map<String, dynamic>) fromJson) {
+  final list = json[key] as List<dynamic>? ?? [];
+  return list.map((e) => fromJson(e as Map<String, dynamic>)).toList();
 }
 
 class ApiService {
-  // Health check — returns true if daemon is reachable
   Future<bool> isAlive() async {
     try {
       await http
@@ -91,21 +78,19 @@ class ApiService {
     }
   }
 
-  // Agents
+  // Agents — returns {"agents": [...]}
   Future<List<Agent>> listAgents() async {
-    final list = await _getList('/api/agents');
-    return list.map((e) => Agent.fromJson(e as Map<String, dynamic>)).toList();
+    final json = await _get('/api/agents');
+    return _extractList(json, 'agents', Agent.fromJson);
   }
 
-  // Configs
+  // Configs — returns {"configs": [...]}
   Future<List<TokenConfig>> listConfigs(String agentType) async {
-    final list = await _getList('/api/configs?agent_type=$agentType');
-    return list
-        .map((e) => TokenConfig.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final json = await _get('/api/configs?agent_type=$agentType');
+    return _extractList(json, 'configs', TokenConfig.fromJson);
   }
 
-  Future<TokenConfig> getConfig(int id) async {
+  Future<TokenConfig> getConfig(String id) async {
     final json = await _get('/api/configs/$id');
     return TokenConfig.fromJson(json);
   }
@@ -115,50 +100,45 @@ class ApiService {
     return TokenConfig.fromJson(json);
   }
 
-  Future<TokenConfig> updateConfig(int id, Map<String, dynamic> body) async {
+  Future<TokenConfig> updateConfig(String id, Map<String, dynamic> body) async {
     final json = await _put('/api/configs/$id', body);
     return TokenConfig.fromJson(json);
   }
 
-  Future<void> deleteConfig(int id) => _delete('/api/configs/$id');
+  Future<void> deleteConfig(String id) => _delete('/api/configs/$id');
 
-  Future<void> activateConfig(int id) => _post('/api/configs/$id/activate');
+  Future<void> activateConfig(String id) => _post('/api/configs/$id/activate');
 
-  Future<void> deactivateConfig(int id) => _post('/api/configs/$id/deactivate');
+  Future<void> deactivateConfig(String id) => _post('/api/configs/$id/deactivate');
 
-  // Usage
-  Future<UsageStats> getUsageStats(int configId) async {
+  // Usage stats — returns flat UsageResponse object
+  Future<UsageStats> getUsageStats(String configId) async {
     final json = await _get('/api/configs/$configId/usage');
     return UsageStats.fromJson(json);
   }
 
-  Future<List<UsageEntry>> getUsages({int? configId}) async {
-    final query = configId != null ? '?config_id=$configId' : '';
-    final list = await _getList('/api/usages$query');
-    return list
-        .map((e) => UsageEntry.fromJson(e as Map<String, dynamic>))
-        .toList();
+  // Usage history — GET /api/configs/:id/usages, returns {"usages": [...]}
+  Future<List<UsageEntry>> getUsages(String configId, {int days = 7}) async {
+    final json = await _get('/api/configs/$configId/usages?days=$days');
+    return _extractList(json, 'usages', UsageEntry.fromJson);
   }
 
-  Future<UsageDelta> getUsageDelta() async {
-    final json = await _get('/api/usage_delta');
-    return UsageDelta.fromJson(json);
+  // Usage delta — GET /api/configs/:id/usages/delta?after=ts, returns {"usages": [...]}
+  Future<List<UsageEntry>> getUsageDelta(String configId, int afterTs) async {
+    final json = await _get('/api/configs/$configId/usages/delta?after=$afterTs');
+    return _extractList(json, 'usages', UsageEntry.fromJson);
   }
 
-  // Latency
-  Future<List<LatencyEntry>> getLatestLatency() async {
-    final list = await _getList('/api/latency/latest');
-    return list
-        .map((e) => LatencyEntry.fromJson(e as Map<String, dynamic>))
-        .toList();
+  // Latest latency — GET /api/configs/:id/latency/latest, returns single object
+  Future<LatestLatencyResponse> getLatestLatency(String configId) async {
+    final json = await _get('/api/configs/$configId/latency/latest');
+    return LatestLatencyResponse.fromJson(json);
   }
 
-  // Companies
+  // Companies — returns {"list": [...]}
   Future<List<Company>> listCompanies() async {
     final json = await _get('/api/companies');
-    final list = (json['list'] as List<dynamic>? ?? []);
-    return list
-        .map((e) => Company.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final list = json['list'] as List<dynamic>? ?? [];
+    return list.map((e) => Company.fromJson(e as Map<String, dynamic>)).toList();
   }
 }
