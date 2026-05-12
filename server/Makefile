@@ -1,10 +1,20 @@
-.PHONY: build release-binaries clean
+.PHONY: build release-binaries clean app
 
 build:
 	cd ../web && npm install && npm run build
 	mkdir -p ./internal/web/dist
 	cp -r ../web/dist/ ./internal/web/dist/
 	go build -o token_gate .
+
+# Build the Flutter desktop app for the current platform.
+# Compiles the Go binary first so it can be embedded in assets/bin/.
+app:
+	$(MAKE) build
+	@mkdir -p ../app/assets/bin
+	@cp token_gate ../app/assets/bin/token_gate
+	cd ../app && flutter build macos
+	@echo ""
+	@echo "Built: app/build/macos/Build/Products/Release/app.app"
 
 # Cross-compile all platforms and package into tarballs/zips.
 # Called by scripts/release.sh — do not run manually.
