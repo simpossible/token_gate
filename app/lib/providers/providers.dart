@@ -99,5 +99,6 @@ final latencyProvider =
 // ── Companies ────────────────────────────────────────────────────────────────
 
 final companiesProvider = FutureProvider<List<Company>>((ref) async {
+  ref.keepAlive();
   return ref.read(apiServiceProvider).listCompanies();
 });

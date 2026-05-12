@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -328,17 +329,17 @@ class _InfoGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      ('厂商', vendorLabel),
-      ('API Key', config.apiKey),
-      ('模型', config.model),
-      ('创建时间', _formatDate(config.createdAt)),
+      ('厂商', vendorLabel, false),
+      ('API Key', config.apiKey, true),
+      ('模型', config.model, false),
+      ('创建时间', _formatDate(config.createdAt), false),
     ];
 
     return Wrap(
       spacing: 12,
       runSpacing: 8,
       children: items
-          .map((e) => _InfoChip(label: e.$1, value: e.$2))
+          .map((e) => _InfoChip(label: e.$1, value: e.$2, copyable: e.$3))
           .toList(),
     );
   }
@@ -353,15 +354,31 @@ class _InfoGrid extends StatelessWidget {
   }
 }
 
-class _InfoChip extends StatelessWidget {
+class _InfoChip extends StatefulWidget {
   final String label;
   final String value;
+  final bool copyable;
 
-  const _InfoChip({required this.label, required this.value});
+  const _InfoChip({required this.label, required this.value, this.copyable = false});
+
+  @override
+  State<_InfoChip> createState() => _InfoChipState();
+}
+
+class _InfoChipState extends State<_InfoChip> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.value));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _copied = false);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: const Color(0xFFF3F4F6),
@@ -371,7 +388,7 @@ class _InfoChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            '$label: ',
+            '${widget.label}: ',
             style: TextStyle(
               fontSize: 12,
               color: Colors.grey[600],
@@ -379,11 +396,34 @@ class _InfoChip extends StatelessWidget {
             ),
           ),
           Text(
-            value,
-            style:
-                const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            _copied ? '已复制' : widget.value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: _copied ? const Color(0xFF10B981) : const Color(0xFF111827),
+            ),
           ),
+          if (widget.copyable) ...[
+            const SizedBox(width: 4),
+            Icon(
+              _copied ? Icons.check : Icons.copy,
+              size: 13,
+              color: _copied
+                  ? const Color(0xFF10B981)
+                  : Colors.grey[400],
+            ),
+          ],
         ],
+      ),
+    );
+
+    if (!widget.copyable) return child;
+    return GestureDetector(
+      onTap: _copy,
+      behavior: HitTestBehavior.opaque,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: child,
       ),
     );
   }

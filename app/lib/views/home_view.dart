@@ -77,6 +77,9 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
     final selectedId = ref.watch(selectedConfigIdProvider);
     final configsAsync = ref.watch(configsProvider);
 
+    // Pre-fetch companies so the data is ready when the form opens
+    ref.watch(companiesProvider);
+
     // Auto-select: active config first, then first in list
     ref.listen(configsProvider, (prev, next) {
       final configs = next.valueOrNull;

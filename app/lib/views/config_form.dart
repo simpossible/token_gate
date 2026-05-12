@@ -55,6 +55,18 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
   Widget build(BuildContext context) {
     final companiesAsync = ref.watch(companiesProvider);
 
+    // In edit mode, auto-match vendor from config URL once companies are loaded
+    if (_isEdit && _selectedCompanyName == null) {
+      final companies = companiesAsync.valueOrNull;
+      if (companies != null && companies.isNotEmpty) {
+        final match = companies.where((c) => c.url == widget.config!.url).firstOrNull;
+        if (match != null) {
+          _selectedCompanyName = match.name;
+          _modelOptions = match.models;
+        }
+      }
+    }
+
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(12),
