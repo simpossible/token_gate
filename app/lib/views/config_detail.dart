@@ -8,6 +8,74 @@ import '../models/usage_entry.dart';
 import '../models/usage_stats.dart';
 import '../providers/providers.dart';
 
+enum _TimeRange { today, sevenDays }
+
+// Unified data point used by both charts (raw or hourly-aggregated).
+class _ChartEntry {
+  final int tsMs;
+  final int inputTokens;
+  final int outputTokens;
+  final int latencyMs; // avg when aggregated, raw when today
+
+  const _ChartEntry({
+    required this.tsMs,
+    required this.inputTokens,
+    required this.outputTokens,
+    required this.latencyMs,
+  });
+
+  DateTime get dt => DateTime.fromMillisecondsSinceEpoch(tsMs);
+}
+
+// Converts raw UsageEntry list into chart-ready _ChartEntry list.
+// today  → filter to today's entries, show raw (no cap)
+// 7days  → group by hour, sum tokens, avg latency
+List<_ChartEntry> _buildChartEntries(
+    List<UsageEntry> entries, _TimeRange range) {
+  if (range == _TimeRange.today) {
+    final now = DateTime.now();
+    return entries
+        .where((e) {
+          final dt = e.createdAt;
+          return dt.year == now.year &&
+              dt.month == now.month &&
+              dt.day == now.day;
+        })
+        .map((e) => _ChartEntry(
+              tsMs: e.createdAtTs,
+              inputTokens: e.inputTokens,
+              outputTokens: e.outputTokens,
+              latencyMs: e.latencyMs,
+            ))
+        .toList();
+  }
+
+  // 7-day hourly aggregation
+  final Map<int, List<UsageEntry>> buckets = {};
+  for (final e in entries) {
+    final dt = e.createdAt;
+    final key = DateTime(dt.year, dt.month, dt.day, dt.hour)
+        .millisecondsSinceEpoch;
+    buckets.putIfAbsent(key, () => []).add(e);
+  }
+  final keys = buckets.keys.toList()..sort();
+  return keys.map((k) {
+    final group = buckets[k]!;
+    final totalIn = group.fold(0, (s, e) => s + e.inputTokens);
+    final totalOut = group.fold(0, (s, e) => s + e.outputTokens);
+    final withLat = group.where((e) => e.latencyMs > 0).toList();
+    final avgLat = withLat.isEmpty
+        ? 0
+        : withLat.fold(0, (s, e) => s + e.latencyMs) ~/ withLat.length;
+    return _ChartEntry(
+      tsMs: k,
+      inputTokens: totalIn,
+      outputTokens: totalOut,
+      latencyMs: avgLat,
+    );
+  }).toList();
+}
+
 class ConfigDetail extends ConsumerStatefulWidget {
   final TokenConfig config;
   final VoidCallback onEdit;
@@ -26,6 +94,7 @@ class ConfigDetail extends ConsumerStatefulWidget {
 
 class _ConfigDetailState extends ConsumerState<ConfigDetail> {
   bool _showLineChart = true;
+  _TimeRange _timeRange = _TimeRange.today;
 
   @override
   Widget build(BuildContext context) {
@@ -36,8 +105,7 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
 
     String vendorLabel;
     try {
-      vendorLabel =
-          companies.firstWhere((c) => c.url == config.url).name;
+      vendorLabel = companies.firstWhere((c) => c.url == config.url).name;
     } catch (_) {
       vendorLabel = config.url;
     }
@@ -87,7 +155,8 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
                 onPressed: widget.onEdit,
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                icon: const Icon(Icons.delete_outline,
+                    size: 18, color: Colors.red),
                 tooltip: '删除',
                 onPressed: () => _confirmDelete(context),
               ),
@@ -119,9 +188,19 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
           // 2.2.3 Token chart card
           _ChartCard(
             title: 'Token 用量',
-            trailing: _SegmentedPill(
-              isLine: _showLineChart,
-              onToggle: (v) => setState(() => _showLineChart = v),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _RangePill(
+                  range: _timeRange,
+                  onToggle: (r) => setState(() => _timeRange = r),
+                ),
+                const SizedBox(width: 8),
+                _SegmentedPill(
+                  isLine: _showLineChart,
+                  onToggle: (v) => setState(() => _showLineChart = v),
+                ),
+              ],
             ),
             legend: _showLineChart
                 ? const Row(children: [
@@ -135,23 +214,37 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
                     _LegendDot(color: Color(0xFF6366F1), label: '合计'),
                   ]),
             child: usagesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('$e', style: const TextStyle(fontSize: 12))),
-              data: (entries) => _TokenChart(entries: entries, isLine: _showLineChart),
+              loading: () =>
+                  const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
+                  child: Text('$e',
+                      style: const TextStyle(fontSize: 12))),
+              data: (entries) {
+                final data = _buildChartEntries(entries, _timeRange);
+                return _TokenChart(entries: data, isLine: _showLineChart);
+              },
             ),
           ),
           const SizedBox(height: 12),
 
-          // 2.2.4 Latency chart card
+          // 2.2.4 Latency chart card (shares same time range)
           _ChartCard(
-            title: '请求延迟 TTFB',
+            title: _timeRange == _TimeRange.today
+                ? '请求延迟 TTFB'
+                : '请求延迟 TTFB（小时均值）',
             legend: const Row(children: [
               _LegendDot(color: Color(0xFFF59E0B), label: '延迟 (ms)'),
             ]),
             child: usagesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, st) => Center(child: Text('$e', style: const TextStyle(fontSize: 12))),
-              data: (entries) => _LatencyChart(entries: entries),
+              loading: () =>
+                  const Center(child: CircularProgressIndicator()),
+              error: (e, st) => Center(
+                  child: Text('$e',
+                      style: const TextStyle(fontSize: 12))),
+              data: (entries) {
+                final data = _buildChartEntries(entries, _timeRange);
+                return _LatencyChart(entries: data);
+              },
             ),
           ),
         ],
@@ -250,7 +343,8 @@ class _InfoChip extends StatelessWidget {
           ),
           Text(
             value,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            style:
+                const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -361,7 +455,8 @@ class _ChartCard extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13),
                 ),
                 const Spacer(),
                 ?trailing,
@@ -387,7 +482,42 @@ class _ChartCard extends StatelessWidget {
   }
 }
 
-// ── Segmented pill toggle ─────────────────────────────────────────────────────
+// ── Range pill toggle (今天 / 7天) ────────────────────────────────────────────
+
+class _RangePill extends StatelessWidget {
+  final _TimeRange range;
+  final ValueChanged<_TimeRange> onToggle;
+
+  const _RangePill({required this.range, required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _PillTab(
+            label: '今天',
+            active: range == _TimeRange.today,
+            onTap: () => onToggle(_TimeRange.today),
+          ),
+          _PillTab(
+            label: '7天',
+            active: range == _TimeRange.sevenDays,
+            onTap: () => onToggle(_TimeRange.sevenDays),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Segmented pill toggle (折线 / 柱状) ────────────────────────────────────────
 
 class _SegmentedPill extends StatelessWidget {
   final bool isLine;
@@ -406,8 +536,10 @@ class _SegmentedPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _PillTab(label: '折线', active: isLine, onTap: () => onToggle(true)),
-          _PillTab(label: '柱状', active: !isLine, onTap: () => onToggle(false)),
+          _PillTab(
+              label: '折线', active: isLine, onTap: () => onToggle(true)),
+          _PillTab(
+              label: '柱状', active: !isLine, onTap: () => onToggle(false)),
         ],
       ),
     );
@@ -419,7 +551,8 @@ class _PillTab extends StatelessWidget {
   final bool active;
   final VoidCallback onTap;
 
-  const _PillTab({required this.label, required this.active, required this.onTap});
+  const _PillTab(
+      {required this.label, required this.active, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -427,20 +560,29 @@ class _PillTab extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: active ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
           boxShadow: active
-              ? [BoxShadow(color: Colors.black.withAlpha(18), blurRadius: 4, offset: const Offset(0, 1))]
+              ? [
+                  BoxShadow(
+                      color: Colors.black.withAlpha(18),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1))
+                ]
               : null,
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 12,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-            color: active ? const Color(0xFF111827) : Colors.grey[500],
+            fontWeight:
+                active ? FontWeight.w600 : FontWeight.w400,
+            color: active
+                ? const Color(0xFF111827)
+                : Colors.grey[500],
           ),
         ),
       ),
@@ -464,14 +606,19 @@ class _LegendDot extends StatelessWidget {
         Container(
           width: 8,
           height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          decoration:
+              BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 4),
-        Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        Text(label,
+            style:
+                TextStyle(fontSize: 11, color: Colors.grey[600])),
       ],
     );
   }
 }
+
+// ── Shared chart helpers ──────────────────────────────────────────────────────
 
 String _fmtTooltipTime(int tsMs) {
   final dt = DateTime.fromMillisecondsSinceEpoch(tsMs);
@@ -481,8 +628,6 @@ String _fmtTooltipTime(int tsMs) {
   final m = dt.minute.toString().padLeft(2, '0');
   return '$mo-$d $h:$m';
 }
-
-
 
 String _fmtK(int n) {
   if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
@@ -495,7 +640,9 @@ double _calcMaxY(double rawMax) {
   if (rawMax <= 0) return 100;
   final padded = rawMax * 1.2;
   double mag = 1;
-  while (mag * 10 < padded) { mag *= 10; }
+  while (mag * 10 < padded) {
+    mag *= 10;
+  }
   if (padded <= mag) return mag;
   if (padded <= 2 * mag) return 2 * mag;
   if (padded <= 5 * mag) return 5 * mag;
@@ -507,7 +654,9 @@ double _niceInterval(double maxY, {int steps = 4}) {
   if (maxY <= 0) return 1;
   final approx = maxY / steps;
   double mag = 1;
-  while (mag * 10 <= approx) { mag *= 10; }
+  while (mag * 10 <= approx) {
+    mag *= 10;
+  }
   if (approx <= mag) return mag;
   if (approx <= 2 * mag) return 2 * mag;
   if (approx <= 5 * mag) return 5 * mag;
@@ -522,6 +671,7 @@ int _xStep(int count) {
   return ((count - 1) / 4).ceil();
 }
 
+// X-axis label: HH:MM when same-day; MM-DD HH:00 when multi-day.
 String _fmtAxisTime(int tsMs, bool sameDay) {
   final dt = DateTime.fromMillisecondsSinceEpoch(tsMs);
   if (sameDay) {
@@ -532,8 +682,10 @@ String _fmtAxisTime(int tsMs, bool sameDay) {
 
 const _axisStyle = TextStyle(fontSize: 9, color: Color(0xFF9CA3AF));
 
+// ── Token chart ───────────────────────────────────────────────────────────────
+
 class _TokenChart extends StatelessWidget {
-  final List<UsageEntry> entries;
+  final List<_ChartEntry> entries;
   final bool isLine;
 
   const _TokenChart({required this.entries, required this.isLine});
@@ -542,20 +694,19 @@ class _TokenChart extends StatelessWidget {
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
       return const Center(
-        child: Text('暂无数据', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text('暂无数据',
+            style: TextStyle(color: Colors.grey, fontSize: 12)),
       );
     }
 
-    final data = entries.length > 20 ? entries.sublist(entries.length - 20) : entries;
-
     if (isLine) {
-      return LineChart(_buildLineData(data));
+      return LineChart(_buildLineData(entries));
     } else {
-      return BarChart(_buildBarData(data));
+      return BarChart(_buildBarData(entries));
     }
   }
 
-  LineChartData _buildLineData(List<UsageEntry> data) {
+  LineChartData _buildLineData(List<_ChartEntry> data) {
     List<FlSpot> inputSpots = [];
     List<FlSpot> outputSpots = [];
     List<FlSpot> totalSpots = [];
@@ -564,7 +715,8 @@ class _TokenChart extends StatelessWidget {
       final e = data[i];
       inputSpots.add(FlSpot(i.toDouble(), e.inputTokens.toDouble()));
       outputSpots.add(FlSpot(i.toDouble(), e.outputTokens.toDouble()));
-      totalSpots.add(FlSpot(i.toDouble(), (e.inputTokens + e.outputTokens).toDouble()));
+      totalSpots.add(FlSpot(
+          i.toDouble(), (e.inputTokens + e.outputTokens).toDouble()));
     }
 
     double rawMax = 0;
@@ -575,23 +727,32 @@ class _TokenChart extends StatelessWidget {
     final maxY = _calcMaxY(rawMax);
     final interval = _niceInterval(maxY);
 
-    final sameDay = data.first.createdAt.day == data.last.createdAt.day &&
-        data.first.createdAt.month == data.last.createdAt.month;
+    final sameDay = data.first.dt.day == data.last.dt.day &&
+        data.first.dt.month == data.last.dt.month;
     final step = _xStep(data.length);
 
     const seriesNames = ['输入', '输出', '合计'];
-    const seriesColors = [Color(0xFF6366F1), Color(0xFF10B981), Color(0xFFF59E0B)];
+    const seriesColors = [
+      Color(0xFF6366F1),
+      Color(0xFF10B981),
+      Color(0xFFF59E0B)
+    ];
 
     return LineChartData(
       minY: 0,
       maxY: maxY,
       lineTouchData: LineTouchData(
         handleBuiltInTouches: true,
-        getTouchedSpotIndicator: (barData, spotIndexes) => spotIndexes.map((_) {
+        getTouchedSpotIndicator: (barData, spotIndexes) =>
+            spotIndexes.map((_) {
           return TouchedSpotIndicatorData(
-            FlLine(color: barData.color?.withAlpha(60) ?? Colors.grey, strokeWidth: 1),
+            FlLine(
+                color:
+                    barData.color?.withAlpha(60) ?? Colors.grey,
+                strokeWidth: 1),
             FlDotData(
-              getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+              getDotPainter: (spot, percent, bar, index) =>
+                  FlDotCirclePainter(
                 radius: 3,
                 color: Colors.white,
                 strokeColor: bar.color ?? Colors.grey,
@@ -603,23 +764,39 @@ class _TokenChart extends StatelessWidget {
         touchTooltipData: LineTouchTooltipData(
           getTooltipColor: (_) => Colors.white,
           tooltipRoundedRadius: 8,
-          tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
-          tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          getTooltipItems: (spots) => spots.asMap().entries.map((entry) {
+          tooltipBorder:
+              const BorderSide(color: Color(0xFFE5E7EB)),
+          tooltipPadding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 6),
+          getTooltipItems: (spots) =>
+              spots.asMap().entries.map((entry) {
             final isFirst = entry.key == 0;
             final s = entry.value;
             final dataIdx = s.x.round();
             final name = seriesNames[s.barIndex];
             final color = seriesColors[s.barIndex];
             final valueText = '$name: ${_fmtK(s.y.toInt())}';
-            if (isFirst && dataIdx >= 0 && dataIdx < data.length) {
+            if (isFirst &&
+                dataIdx >= 0 &&
+                dataIdx < data.length) {
               return LineTooltipItem(
-                '${_fmtTooltipTime(data[dataIdx].createdAtTs)}\n',
-                const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10, fontWeight: FontWeight.w400),
-                children: [TextSpan(text: valueText, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600))],
+                '${_fmtTooltipTime(data[dataIdx].tsMs)}\n',
+                const TextStyle(
+                    color: Color(0xFF9CA3AF),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w400),
+                children: [
+                  TextSpan(
+                      text: valueText,
+                      style: TextStyle(
+                          color: color,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600))
+                ],
               );
             }
-            return LineTooltipItem(valueText, TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600));
+            return LineTooltipItem(valueText,
+                TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600));
           }).toList(),
         ),
       ),
@@ -627,7 +804,8 @@ class _TokenChart extends StatelessWidget {
         drawHorizontalLine: true,
         drawVerticalLine: false,
         horizontalInterval: interval,
-        getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
+        getDrawingHorizontalLine: (_) =>
+            FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
       ),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(
@@ -636,17 +814,22 @@ class _TokenChart extends StatelessWidget {
             reservedSize: 38,
             interval: interval,
             getTitlesWidget: (value, meta) {
-              if (value == 0 || value > maxY) return const SizedBox.shrink();
+              if (value == 0 || value > maxY) {
+                return const SizedBox.shrink();
+              }
               return SideTitleWidget(
                 meta: meta,
                 space: 4,
-                child: Text(_fmtK(value.toInt()), style: _axisStyle),
+                child: Text(_fmtK(value.toInt()),
+                    style: _axisStyle),
               );
             },
           ),
         ),
-        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles:
+            AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles:
+            AxisTitles(sideTitles: SideTitles(showTitles: false)),
         bottomTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
@@ -654,13 +837,17 @@ class _TokenChart extends StatelessWidget {
             interval: step.toDouble(),
             getTitlesWidget: (value, meta) {
               final idx = value.round();
-              if (idx < 0 || idx >= data.length || value != idx.toDouble()) {
+              if (idx < 0 ||
+                  idx >= data.length ||
+                  value != idx.toDouble()) {
                 return const SizedBox.shrink();
               }
               return SideTitleWidget(
                 meta: meta,
                 space: 4,
-                child: Text(_fmtAxisTime(data[idx].createdAtTs, sameDay), style: _axisStyle),
+                child: Text(
+                    _fmtAxisTime(data[idx].tsMs, sameDay),
+                    style: _axisStyle),
               );
             },
           ),
@@ -682,11 +869,12 @@ class _TokenChart extends StatelessWidget {
       color: color,
       barWidth: 2,
       dotData: const FlDotData(show: false),
-      belowBarData: BarAreaData(show: true, color: color.withAlpha(20)),
+      belowBarData:
+          BarAreaData(show: true, color: color.withAlpha(20)),
     );
   }
 
-  BarChartData _buildBarData(List<UsageEntry> data) {
+  BarChartData _buildBarData(List<_ChartEntry> data) {
     double rawMax = 0;
     for (final e in data) {
       final t = (e.inputTokens + e.outputTokens).toDouble();
@@ -695,8 +883,8 @@ class _TokenChart extends StatelessWidget {
     final maxY = _calcMaxY(rawMax);
     final interval = _niceInterval(maxY);
 
-    final sameDay = data.first.createdAt.day == data.last.createdAt.day &&
-        data.first.createdAt.month == data.last.createdAt.month;
+    final sameDay = data.first.dt.day == data.last.dt.day &&
+        data.first.dt.month == data.last.dt.month;
     final step = _xStep(data.length);
 
     return BarChartData(
@@ -705,11 +893,18 @@ class _TokenChart extends StatelessWidget {
         touchTooltipData: BarTouchTooltipData(
           getTooltipColor: (_) => Colors.white,
           tooltipRoundedRadius: 8,
-          tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
-          tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem(
+          tooltipBorder:
+              const BorderSide(color: Color(0xFFE5E7EB)),
+          tooltipPadding: const EdgeInsets.symmetric(
+              horizontal: 10, vertical: 6),
+          getTooltipItem:
+              (group, groupIndex, rod, rodIndex) =>
+                  BarTooltipItem(
             '合计: ${_fmtK(rod.toY.toInt())}',
-            const TextStyle(color: Color(0xFF6366F1), fontSize: 11, fontWeight: FontWeight.w600),
+            const TextStyle(
+                color: Color(0xFF6366F1),
+                fontSize: 11,
+                fontWeight: FontWeight.w600),
           ),
         ),
       ),
@@ -717,7 +912,8 @@ class _TokenChart extends StatelessWidget {
         drawHorizontalLine: true,
         drawVerticalLine: false,
         horizontalInterval: interval,
-        getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
+        getDrawingHorizontalLine: (_) =>
+            FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
       ),
       titlesData: FlTitlesData(
         leftTitles: AxisTitles(
@@ -726,17 +922,22 @@ class _TokenChart extends StatelessWidget {
             reservedSize: 38,
             interval: interval,
             getTitlesWidget: (value, meta) {
-              if (value == 0 || value > maxY) return const SizedBox.shrink();
+              if (value == 0 || value > maxY) {
+                return const SizedBox.shrink();
+              }
               return SideTitleWidget(
                 meta: meta,
                 space: 4,
-                child: Text(_fmtK(value.toInt()), style: _axisStyle),
+                child: Text(_fmtK(value.toInt()),
+                    style: _axisStyle),
               );
             },
           ),
         ),
-        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles:
+            AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles:
+            AxisTitles(sideTitles: SideTitles(showTitles: false)),
         bottomTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
@@ -744,13 +945,17 @@ class _TokenChart extends StatelessWidget {
             interval: step.toDouble(),
             getTitlesWidget: (value, meta) {
               final idx = value.round();
-              if (idx < 0 || idx >= data.length || value != idx.toDouble()) {
+              if (idx < 0 ||
+                  idx >= data.length ||
+                  value != idx.toDouble()) {
                 return const SizedBox.shrink();
               }
               return SideTitleWidget(
                 meta: meta,
                 space: 4,
-                child: Text(_fmtAxisTime(data[idx].createdAtTs, sameDay), style: _axisStyle),
+                child: Text(
+                    _fmtAxisTime(data[idx].tsMs, sameDay),
+                    style: _axisStyle),
               );
             },
           ),
@@ -763,10 +968,12 @@ class _TokenChart extends StatelessWidget {
           x: i,
           barRods: [
             BarChartRodData(
-              toY: (data[i].inputTokens + data[i].outputTokens).toDouble(),
+              toY: (data[i].inputTokens + data[i].outputTokens)
+                  .toDouble(),
               color: const Color(0xFF6366F1),
               width: 8,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(3)),
             ),
           ],
         ),
@@ -775,21 +982,22 @@ class _TokenChart extends StatelessWidget {
   }
 }
 
+// ── Latency chart ─────────────────────────────────────────────────────────────
+
 class _LatencyChart extends StatelessWidget {
-  final List<UsageEntry> entries;
+  final List<_ChartEntry> entries;
 
   const _LatencyChart({required this.entries});
 
   @override
   Widget build(BuildContext context) {
-    final withLatency = entries.where((e) => e.latencyMs > 0).toList();
-    if (withLatency.isEmpty) {
+    final data = entries.where((e) => e.latencyMs > 0).toList();
+    if (data.isEmpty) {
       return const Center(
-        child: Text('暂无数据', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        child: Text('暂无数据',
+            style: TextStyle(color: Colors.grey, fontSize: 12)),
       );
     }
-
-    final data = withLatency.length > 30 ? withLatency.sublist(withLatency.length - 30) : withLatency;
 
     double rawMax = 0;
     for (final e in data) {
@@ -798,8 +1006,8 @@ class _LatencyChart extends StatelessWidget {
     final maxY = _calcMaxY(rawMax);
     final interval = _niceInterval(maxY);
 
-    final sameDay = data.first.createdAt.day == data.last.createdAt.day &&
-        data.first.createdAt.month == data.last.createdAt.month;
+    final sameDay = data.first.dt.day == data.last.dt.day &&
+        data.first.dt.month == data.last.dt.month;
     final step = _xStep(data.length);
 
     final spots = List.generate(
@@ -813,11 +1021,15 @@ class _LatencyChart extends StatelessWidget {
         maxY: maxY,
         lineTouchData: LineTouchData(
           handleBuiltInTouches: true,
-          getTouchedSpotIndicator: (barData, spotIndexes) => spotIndexes.map((_) {
+          getTouchedSpotIndicator: (barData, spotIndexes) =>
+              spotIndexes.map((_) {
             return TouchedSpotIndicatorData(
-              FlLine(color: const Color(0xFFF59E0B).withAlpha(60), strokeWidth: 1),
+              FlLine(
+                  color: const Color(0xFFF59E0B).withAlpha(60),
+                  strokeWidth: 1),
               FlDotData(
-                getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                getDotPainter: (spot, percent, bar, index) =>
+                    FlDotCirclePainter(
                   radius: 3,
                   color: Colors.white,
                   strokeColor: const Color(0xFFF59E0B),
@@ -829,21 +1041,41 @@ class _LatencyChart extends StatelessWidget {
           touchTooltipData: LineTouchTooltipData(
             getTooltipColor: (_) => Colors.white,
             tooltipRoundedRadius: 8,
-            tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
-            tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            getTooltipItems: (spots) => spots.asMap().entries.map((entry) {
+            tooltipBorder:
+                const BorderSide(color: Color(0xFFE5E7EB)),
+            tooltipPadding: const EdgeInsets.symmetric(
+                horizontal: 10, vertical: 6),
+            getTooltipItems: (spots) =>
+                spots.asMap().entries.map((entry) {
               final isFirst = entry.key == 0;
               final s = entry.value;
               final dataIdx = s.x.round();
               final valueText = '${s.y.toInt()} ms';
-              if (isFirst && dataIdx >= 0 && dataIdx < data.length) {
+              if (isFirst &&
+                  dataIdx >= 0 &&
+                  dataIdx < data.length) {
                 return LineTooltipItem(
-                  '${_fmtTooltipTime(data[dataIdx].createdAtTs)}\n',
-                  const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10, fontWeight: FontWeight.w400),
-                  children: [TextSpan(text: valueText, style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.w600))],
+                  '${_fmtTooltipTime(data[dataIdx].tsMs)}\n',
+                  const TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w400),
+                  children: [
+                    TextSpan(
+                        text: valueText,
+                        style: const TextStyle(
+                            color: Color(0xFFF59E0B),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600))
+                  ],
                 );
               }
-              return LineTooltipItem(valueText, const TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.w600));
+              return LineTooltipItem(
+                  valueText,
+                  const TextStyle(
+                      color: Color(0xFFF59E0B),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600));
             }).toList(),
           ),
         ),
@@ -851,7 +1083,8 @@ class _LatencyChart extends StatelessWidget {
           drawHorizontalLine: true,
           drawVerticalLine: false,
           horizontalInterval: interval,
-          getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
+          getDrawingHorizontalLine: (_) =>
+              FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
         ),
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
@@ -860,17 +1093,22 @@ class _LatencyChart extends StatelessWidget {
               reservedSize: 42,
               interval: interval,
               getTitlesWidget: (value, meta) {
-                if (value == 0 || value > maxY) return const SizedBox.shrink();
+                if (value == 0 || value > maxY) {
+                  return const SizedBox.shrink();
+                }
                 return SideTitleWidget(
                   meta: meta,
                   space: 4,
-                  child: Text('${value.toInt()}ms', style: _axisStyle),
+                  child: Text('${value.toInt()}ms',
+                      style: _axisStyle),
                 );
               },
             ),
           ),
-          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles:
+              AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles:
+              AxisTitles(sideTitles: SideTitles(showTitles: false)),
           bottomTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
@@ -878,13 +1116,17 @@ class _LatencyChart extends StatelessWidget {
               interval: step.toDouble(),
               getTitlesWidget: (value, meta) {
                 final idx = value.round();
-                if (idx < 0 || idx >= data.length || value != idx.toDouble()) {
+                if (idx < 0 ||
+                    idx >= data.length ||
+                    value != idx.toDouble()) {
                   return const SizedBox.shrink();
                 }
                 return SideTitleWidget(
                   meta: meta,
                   space: 4,
-                  child: Text(_fmtAxisTime(data[idx].createdAtTs, sameDay), style: _axisStyle),
+                  child: Text(
+                      _fmtAxisTime(data[idx].tsMs, sameDay),
+                      style: _axisStyle),
                 );
               },
             ),
@@ -898,7 +1140,9 @@ class _LatencyChart extends StatelessWidget {
             color: const Color(0xFFF59E0B),
             barWidth: 2,
             dotData: const FlDotData(show: false),
-            belowBarData: BarAreaData(show: true, color: const Color(0xFFF59E0B).withAlpha(25)),
+            belowBarData: BarAreaData(
+                show: true,
+                color: const Color(0xFFF59E0B).withAlpha(25)),
           ),
         ],
       ),
