@@ -10,6 +10,9 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    // Disable zoom button — window has fixed size
+    self.standardWindowButton(.zoomButton)?.isEnabled = false
+
     super.awakeFromNib()
   }
 }

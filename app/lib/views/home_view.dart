@@ -77,6 +77,17 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
     final selectedId = ref.watch(selectedConfigIdProvider);
     final configsAsync = ref.watch(configsProvider);
 
+    // Auto-select: active config first, then first in list
+    ref.listen(configsProvider, (prev, next) {
+      final configs = next.valueOrNull;
+      if (configs == null || configs.isEmpty) return;
+      final current = ref.read(selectedConfigIdProvider);
+      if (current != null && configs.any((c) => c.id == current)) return;
+      final active = configs.where((c) => c.isActive).firstOrNull;
+      ref.read(selectedConfigIdProvider.notifier).state =
+          (active ?? configs.first).id;
+    });
+
     // Resolve the currently selected config object
     final selectedConfig = configsAsync.valueOrNull
         ?.where((c) => c.id == selectedId)
@@ -84,10 +95,12 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          // ── Main content ────────────────────────────────────────────────
-          Column(
+      body: Padding(
+        padding: const EdgeInsets.only(top: 28),
+        child: Stack(
+          children: [
+            // ── Main content ────────────────────────────────────────────────
+            Column(
             children: [
               _TopBar(
                 agentsAsync: agentsAsync,
@@ -163,7 +176,8 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
               ),
             ),
           ],
-        ],
+          ],
+        ),
       ),
     );
   }
