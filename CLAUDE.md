@@ -110,7 +110,12 @@ Go backend pushes events to Flutter via SSE (Server-Sent Events). `internal/even
 
 **Event payloads:**
 
-- `gate_log`: `{message: "14:30:01 → POST /v1/messages model=xxx (1234 bytes)"}` — human-readable string, pushed on request received (`→`) and response complete (`←`)
+- `gate_log`: `{message: "..."}` — pushed multiple times per request:
+  1. Request summary line: `"14:30:01 → POST /v1/messages model=xxx (1234 bytes)"`
+  2. Request body: full pretty-printed JSON
+  3. SSE streaming: each `data:` line pushed individually in real-time
+  4. Non-SSE response: full pretty-printed response JSON
+  5. Response summary line: `"14:30:03 ← ↑185 ↓79 1569ms streaming"`
 - `usage_new`: `{input_tokens, output_tokens, latency_ms}` — pushed after usage recorded in DB
 - `total_token_change`: `{added_in_tokens, added_out_tokens}` — global, for tray title update
 
@@ -191,15 +196,17 @@ app/
 │   │   └── latency_entry.dart       # LatencyEntry (ttfbMs/createdAtTs)
 │   ├── services/
 │   │   ├── api_service.dart         # 封装全部 :12122 REST 调用，含 isAlive() 健康检查
+│   │   ├── event_service.dart       # SSE 客户端：手动解析 SSE 格式，按 key 管理连接，自动重连(3s)
 │   │   ├── backend_service.dart     # ensureRunning(): 检测→释放二进制→启动→等待就绪(5s)
-│   │   └── tray_service.dart        # 状态栏：每5s刷新 ↑xK ↓xK，菜单含打开/退出
+│   │   └── tray_service.dart        # 状态栏：监听 total_token_change 事件更新 ↑xK ↓xK
 │   ├── providers/
 │   │   └── providers.dart           # Riverpod providers（见下）
 │   └── views/
-│       ├── home_view.dart           # 主布局：顶部栏 + 左右分栏，持有 WindowListener
+│       ├── home_view.dart           # 主布局：顶部栏 + 左右分栏 + LogPanel overlay，持有 WindowListener
 │       ├── config_list.dart         # 左侧 220pt 卡片列表，单击选中/双击 activate
-│       ├── config_detail.dart       # 右侧详情：基本信息 + 4 统计数字 + Token 图表 + 延迟图表
-│       └── config_form.dart         # 创建/编辑表单（BottomSheet），含厂商预设下拉
+│       ├── config_detail.dart       # 右侧详情：监听 usage_new 实时刷新 + 日志按钮
+│       ├── config_form.dart         # 创建/编辑表单（BottomSheet），含厂商预设下拉
+│       └── log_panel.dart           # 720pt 黑色半透明日志面板，右侧滑入，监听 gate_log
 ├── assets/
 │   ├── bin/token_gate               # 编译好的 Go 二进制（make app 自动注入）
 │   └── icons/tray_icon.png          # 状态栏图标（22×22）
@@ -236,8 +243,9 @@ main() → windowManager.ensureInitialized() → 固定窗口参数
 | Provider | 类型 | 说明 |
 |---|---|---|
 | `apiServiceProvider` | `Provider<ApiService>` | 单例 API 客户端 |
+| `eventServiceProvider` | `Provider<EventService>` | SSE 客户端管理（按 key 管理连接，自动重连） |
 | `backendServiceProvider` | `Provider<BackendService>` | daemon 管理 |
-| `trayServiceProvider` | `Provider<TrayService>` | 状态栏管理 |
+| `trayServiceProvider` | `Provider<TrayService>` | 状态栏管理（监听 total_token_change 事件） |
 | `selectedAgentTypeProvider` | `StateProvider<String>` | 当前选中 agent 类型（默认 `claude_code`） |
 | `selectedConfigIdProvider` | `StateProvider<int?>` | 当前选中配置 ID |
 | `agentsProvider` | `FutureProvider<List<Agent>>` | GET /api/agents |
