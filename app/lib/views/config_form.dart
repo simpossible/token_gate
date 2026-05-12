@@ -23,6 +23,9 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
   late final TextEditingController _urlCtrl;
   late final TextEditingController _modelCtrl;
   String? _selectedAgentType;
+  String? _selectedCompanyName;
+  String? _namePlaceholder;
+  List<String> _modelOptions = [];
   bool _saving = false;
   String? _error;
 
@@ -36,8 +39,7 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
     _apiKeyCtrl = TextEditingController(text: c?.apiKey ?? '');
     _urlCtrl = TextEditingController(text: c?.url ?? '');
     _modelCtrl = TextEditingController(text: c?.model ?? '');
-    _selectedAgentType =
-        c?.agentType ?? ref.read(selectedAgentTypeProvider);
+    _selectedAgentType = c?.agentType ?? ref.read(selectedAgentTypeProvider);
   }
 
   @override
@@ -51,131 +53,189 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
 
   @override
   Widget build(BuildContext context) {
-    final agentsAsync = ref.watch(agentsProvider);
     final companiesAsync = ref.watch(companiesProvider);
 
     return Material(
       color: Colors.white,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      borderRadius: BorderRadius.circular(12),
+      elevation: 20,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // ── Header ──────────────────────────────────────────────────────
             Row(
               children: [
                 Text(
                   _isEdit ? '编辑配置' : '创建配置',
                   style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF111827),
                   ),
                 ),
                 const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: widget.onDone,
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 16,
+                    icon: const Icon(Icons.close, color: Color(0xFF9CA3AF)),
+                    onPressed: widget.onDone,
+                  ),
                 ),
               ],
             ),
-            const Divider(),
+            const SizedBox(height: 10),
+            Divider(height: 1, color: Colors.grey[200]),
+            const SizedBox(height: 10),
+
+            // ── Form fields ──────────────────────────────────────────────────
             Flexible(
               child: SingleChildScrollView(
                 child: Form(
                   key: _formKey,
                   child: Column(
                     children: [
-                      // Agent type (only on create)
-                      if (!_isEdit)
-                        agentsAsync.when(
-                          loading: () => const SizedBox.shrink(),
-                          error: (e, st) => const SizedBox.shrink(),
-                          data: (agents) => _FormField(
-                            label: 'Agent 类型',
-                            child: DropdownButtonFormField<String>(
-                            initialValue: _selectedAgentType,
-                              decoration: _inputDeco('选择 Agent 类型'),
-                              items: agents
-                                  .map((a) => DropdownMenuItem(
-                                        value: a.type,
-                                        child: Text(a.label),
-                                      ))
-                                  .toList(),
-                              onChanged: (v) =>
-                                  setState(() => _selectedAgentType = v),
-                              validator: (v) =>
-                                  v == null ? '请选择 Agent 类型' : null,
-                            ),
-                          ),
-                        ),
-
-                      _FormField(
+                      _Field(
                         label: '名称',
                         child: TextFormField(
                           controller: _nameCtrl,
-                          decoration: _inputDeco('配置名称'),
+                          decoration: _deco(_namePlaceholder ?? '配置名称'),
+                          style: _fieldTextStyle,
                           validator: (v) =>
-                              v == null || v.isEmpty ? '请输入名称' : null,
+                              (v == null || v.isEmpty) && _namePlaceholder == null
+                                  ? '请输入名称'
+                                  : null,
                         ),
                       ),
 
-                      _FormField(
+                      _Field(
                         label: 'API Key',
                         child: TextFormField(
                           controller: _apiKeyCtrl,
-                          decoration: _inputDeco('sk-ant-...'),
+                          decoration: _deco('sk-ant-...'),
+                          style: _fieldTextStyle,
                           obscureText: true,
                           validator: (v) =>
                               v == null || v.isEmpty ? '请输入 API Key' : null,
                         ),
                       ),
 
-                      // Vendor preset selector
-                      companiesAsync.when(
-                        loading: () => const SizedBox.shrink(),
-                        error: (e, st) => const SizedBox.shrink(),
-                        data: (companies) => _FormField(
-                          label: '厂商（可选）',
-                          child: DropdownButtonFormField<String>(
-                            initialValue: null,
-                            decoration: _inputDeco('选择厂商预设（自动填充 URL 和模型）'),
-                            items: companies
-                                .map((c) => DropdownMenuItem(
-                                      value: c.url,
-                                      child: Text(c.name),
-                                    ))
-                                .toList(),
-                            onChanged: (url) {
-                              if (url == null) return;
-                              final company = companies.firstWhere(
-                                  (c) => c.url == url);
-                              _urlCtrl.text = url;
-                              if (company.models.isNotEmpty) {
-                                _modelCtrl.text = company.models.first;
-                              }
-                            },
-                          ),
+                      // Vendor preset
+                      _Field(
+                        label: '厂商（可选）',
+                        child: LayoutBuilder(
+                          builder: (ctx, bc) {
+                            final companies =
+                                companiesAsync.valueOrNull ?? [];
+                            return PopupMenuButton<String>(
+                              enabled: companies.isNotEmpty,
+                              position: PopupMenuPosition.under,
+                              constraints: BoxConstraints(
+                                minWidth: bc.maxWidth,
+                                maxWidth: bc.maxWidth,
+                                maxHeight: 200,
+                              ),
+                              onSelected: (url) {
+                                final company = companies
+                                    .firstWhere((c) => c.url == url);
+                                _urlCtrl.text = url;
+                                setState(() {
+                                  _selectedCompanyName = company.name;
+                                  _namePlaceholder = _buildNamePlaceholder(company.name);
+                                  if (company.models.isNotEmpty) {
+                                    _modelOptions = company.models;
+                                    _modelCtrl.text = company.models.first;
+                                  }
+                                });
+                              },
+                              itemBuilder: (context) => companies
+                                  .map((c) => PopupMenuItem<String>(
+                                        value: c.url,
+                                        height: 32,
+                                        child: Text(c.name,
+                                            style: const TextStyle(
+                                                fontSize: 12)),
+                                      ))
+                                  .toList(),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 7),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                      color: const Color(0xFFE5E7EB)),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        _selectedCompanyName ??
+                                            '选择厂商预设',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: _selectedCompanyName != null
+                                              ? const Color(0xFF111827)
+                                              : const Color(0xFFD1D5DB),
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const Icon(Icons.arrow_drop_down,
+                                        size: 18,
+                                        color: Color(0xFF9CA3AF)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
 
-                      _FormField(
+                      _Field(
                         label: 'API URL',
                         child: TextFormField(
                           controller: _urlCtrl,
-                          decoration:
-                              _inputDeco('https://api.anthropic.com'),
+                          decoration: _deco('https://api.anthropic.com'),
+                          style: _fieldTextStyle,
                           validator: (v) =>
                               v == null || v.isEmpty ? '请输入 API URL' : null,
                         ),
                       ),
 
-                      _FormField(
+                      _Field(
                         label: '模型',
                         child: TextFormField(
                           controller: _modelCtrl,
-                          decoration:
-                              _inputDeco('claude-sonnet-4-5-20251022'),
+                          decoration: _deco('claude-sonnet-4-5-20251022').copyWith(
+                            suffixIcon: _modelOptions.isNotEmpty
+                                ? PopupMenuButton<String>(
+                                    tooltip: '选择模型',
+                                    icon: const Icon(
+                                      Icons.arrow_drop_down,
+                                      size: 18,
+                                      color: Color(0xFF9CA3AF),
+                                    ),
+                                    onSelected: (value) =>
+                                        _modelCtrl.text = value,
+                                    itemBuilder: (context) => _modelOptions
+                                        .map((m) => PopupMenuItem<String>(
+                                              value: m,
+                                              height: 32,
+                                              child: Text(m,
+                                                  style: const TextStyle(
+                                                      fontSize: 12)),
+                                            ))
+                                        .toList(),
+                                  )
+                                : null,
+                          ),
+                          style: _fieldTextStyle,
                           validator: (v) =>
                               v == null || v.isEmpty ? '请输入模型名称' : null,
                         ),
@@ -183,31 +243,34 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
 
                       if (_error != null)
                         Padding(
-                          padding: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.only(top: 4, bottom: 4),
                           child: Text(
                             _error!,
                             style: const TextStyle(
-                                color: Colors.red, fontSize: 13),
+                                color: Colors.red, fontSize: 12),
                           ),
                         ),
 
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 10),
                       SizedBox(
                         width: double.infinity,
+                        height: 34,
                         child: ElevatedButton(
                           onPressed: _saving ? null : _submit,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF6366F1),
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 0,
+                            textStyle: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w500),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(7),
                             ),
                           ),
                           child: _saving
                               ? const SizedBox(
-                                  height: 18,
-                                  width: 18,
+                                  height: 14,
+                                  width: 14,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                     color: Colors.white,
@@ -227,19 +290,35 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
     );
   }
 
-  InputDecoration _inputDeco(String hint) {
+  static const _fieldTextStyle = TextStyle(fontSize: 13, color: Color(0xFF111827));
+
+  static String _buildNamePlaceholder(String companyName) {
+    final now = DateTime.now();
+    final ts = '${now.year}'
+        '${now.month.toString().padLeft(2, '0')}'
+        '${now.day.toString().padLeft(2, '0')}'
+        '${now.hour.toString().padLeft(2, '0')}'
+        '${now.minute.toString().padLeft(2, '0')}';
+    return '${companyName.replaceAll(RegExp(r'\s+'), '')}$ts';
+  }
+
+  InputDecoration _deco(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: Colors.grey[400], fontSize: 13),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      hintStyle: const TextStyle(color: Color(0xFFD1D5DB), fontSize: 12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      isDense: true,
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(6),
+        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(6),
+        borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(6),
+        borderSide: const BorderSide(color: Color(0xFF6366F1)),
       ),
     );
   }
@@ -253,7 +332,7 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
     try {
       final api = ref.read(apiServiceProvider);
       final body = {
-        'name': _nameCtrl.text,
+        'name': _nameCtrl.text.isEmpty ? (_namePlaceholder ?? '') : _nameCtrl.text,
         'api_key': _apiKeyCtrl.text,
         'url': _urlCtrl.text,
         'model': _modelCtrl.text,
@@ -276,28 +355,28 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
   }
 }
 
-class _FormField extends StatelessWidget {
+class _Field extends StatelessWidget {
   final String label;
   final Widget child;
 
-  const _FormField({required this.label, required this.child});
+  const _Field({required this.label, required this.child});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
             style: const TextStyle(
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: Color(0xFF374151),
+              color: Color(0xFF6B7280),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           child,
         ],
       ),

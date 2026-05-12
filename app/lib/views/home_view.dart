@@ -80,54 +80,60 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Column(
+      body: Stack(
         children: [
-          // ── Top bar ──────────────────────────────────────────────────────
-          _TopBar(
-            agentsAsync: agentsAsync,
-            selectedAgentType: selectedAgentType,
-            onAgentChanged: (type) {
-              ref.read(selectedAgentTypeProvider.notifier).state = type;
-              ref.read(selectedConfigIdProvider.notifier).state = null;
-              ref.read(configsProvider.notifier).reload();
-            },
-            onCreateTap: _openCreate,
+          // ── Main content ────────────────────────────────────────────────
+          Column(
+            children: [
+              _TopBar(
+                agentsAsync: agentsAsync,
+                selectedAgentType: selectedAgentType,
+                onAgentChanged: (type) {
+                  ref.read(selectedAgentTypeProvider.notifier).state = type;
+                  ref.read(selectedConfigIdProvider.notifier).state = null;
+                  ref.read(configsProvider.notifier).reload();
+                },
+                onCreateTap: _openCreate,
+              ),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ConfigList(onCreateTap: _openCreate),
+                    Expanded(
+                      child: selectedConfig != null
+                          ? ConfigDetail(
+                              config: selectedConfig,
+                              onEdit: () => _openEdit(selectedConfig),
+                              onDeleted: () {},
+                            )
+                          : _EmptyDetail(onCreateTap: _openCreate),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
 
-          // ── Body: left list + right detail ──────────────────────────────
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ConfigList(onCreateTap: _openCreate),
-                Expanded(
-                  child: selectedConfig != null
-                      ? ConfigDetail(
-                          config: selectedConfig,
-                          onEdit: () => _openEdit(selectedConfig),
-                          onDeleted: () {},
-                        )
-                      : _EmptyDetail(onCreateTap: _openCreate),
-                ),
-              ],
+          // ── Modal overlay for create / edit ─────────────────────────────
+          if (_showForm) ...[
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _closeForm,
+              child: Container(color: Colors.black.withValues(alpha: 0.30)),
             ),
-          ),
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400, maxHeight: 490),
+                child: ConfigForm(
+                  config: _editingConfig,
+                  onDone: _closeForm,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
-
-      // ── Bottom sheet for create / edit ──────────────────────────────────
-      bottomSheet: _showForm
-          ? DraggableScrollableSheet(
-              expand: false,
-              initialChildSize: 0.75,
-              minChildSize: 0.5,
-              maxChildSize: 0.92,
-              builder: (ctx, scrollController) => ConfigForm(
-                config: _editingConfig,
-                onDone: _closeForm,
-              ),
-            )
-          : null,
     );
   }
 }
