@@ -375,9 +375,9 @@ class _ChartCard extends StatelessWidget {
               child: legend!,
             ),
           SizedBox(
-            height: 148,
+            height: 172,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 8, 12, 8),
+              padding: const EdgeInsets.fromLTRB(0, 6, 8, 4),
               child: child,
             ),
           ),
@@ -473,13 +473,64 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-// ── Charts ───────────────────────────────────────────────────────────────────
+String _fmtTooltipTime(int tsMs) {
+  final dt = DateTime.fromMillisecondsSinceEpoch(tsMs);
+  final mo = dt.month.toString().padLeft(2, '0');
+  final d = dt.day.toString().padLeft(2, '0');
+  final h = dt.hour.toString().padLeft(2, '0');
+  final m = dt.minute.toString().padLeft(2, '0');
+  return '$mo-$d $h:$m';
+}
+
+
 
 String _fmtK(int n) {
   if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
   if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
   return '$n';
 }
+
+// Rounds up to next "nice" number (1/2/5 × 10^n) with 20% headroom.
+double _calcMaxY(double rawMax) {
+  if (rawMax <= 0) return 100;
+  final padded = rawMax * 1.2;
+  double mag = 1;
+  while (mag * 10 < padded) { mag *= 10; }
+  if (padded <= mag) return mag;
+  if (padded <= 2 * mag) return 2 * mag;
+  if (padded <= 5 * mag) return 5 * mag;
+  return 10 * mag;
+}
+
+// Returns a "nice" interval so that maxY / interval ≈ steps.
+double _niceInterval(double maxY, {int steps = 4}) {
+  if (maxY <= 0) return 1;
+  final approx = maxY / steps;
+  double mag = 1;
+  while (mag * 10 <= approx) { mag *= 10; }
+  if (approx <= mag) return mag;
+  if (approx <= 2 * mag) return 2 * mag;
+  if (approx <= 5 * mag) return 5 * mag;
+  return 10 * mag;
+}
+
+// How many data-points to skip between X labels, targeting ~5 labels total.
+int _xStep(int count) {
+  if (count <= 5) return 1;
+  if (count <= 10) return 2;
+  if (count <= 15) return 3;
+  return ((count - 1) / 4).ceil();
+}
+
+String _fmtAxisTime(int tsMs, bool sameDay) {
+  final dt = DateTime.fromMillisecondsSinceEpoch(tsMs);
+  if (sameDay) {
+    return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+  return '${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+}
+
+const _axisStyle = TextStyle(fontSize: 9, color: Color(0xFF9CA3AF));
 
 class _TokenChart extends StatelessWidget {
   final List<UsageEntry> entries;
@@ -516,41 +567,104 @@ class _TokenChart extends StatelessWidget {
       totalSpots.add(FlSpot(i.toDouble(), (e.inputTokens + e.outputTokens).toDouble()));
     }
 
+    double rawMax = 0;
+    for (final e in data) {
+      final t = (e.inputTokens + e.outputTokens).toDouble();
+      if (t > rawMax) rawMax = t;
+    }
+    final maxY = _calcMaxY(rawMax);
+    final interval = _niceInterval(maxY);
+
+    final sameDay = data.first.createdAt.day == data.last.createdAt.day &&
+        data.first.createdAt.month == data.last.createdAt.month;
+    final step = _xStep(data.length);
+
     const seriesNames = ['输入', '输出', '合计'];
     const seriesColors = [Color(0xFF6366F1), Color(0xFF10B981), Color(0xFFF59E0B)];
 
     return LineChartData(
+      minY: 0,
+      maxY: maxY,
       lineTouchData: LineTouchData(
         handleBuiltInTouches: true,
+        getTouchedSpotIndicator: (barData, spotIndexes) => spotIndexes.map((_) {
+          return TouchedSpotIndicatorData(
+            FlLine(color: barData.color?.withAlpha(60) ?? Colors.grey, strokeWidth: 1),
+            FlDotData(
+              getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                radius: 3,
+                color: Colors.white,
+                strokeColor: bar.color ?? Colors.grey,
+                strokeWidth: 2,
+              ),
+            ),
+          );
+        }).toList(),
         touchTooltipData: LineTouchTooltipData(
           getTooltipColor: (_) => Colors.white,
           tooltipRoundedRadius: 8,
           tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          getTooltipItems: (spots) => spots.map((s) {
-            final idx = s.barIndex;
-            return LineTooltipItem(
-              '${seriesNames[idx]}: ${_fmtK(s.y.toInt())}',
-              TextStyle(
-                color: seriesColors[idx],
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            );
+          getTooltipItems: (spots) => spots.asMap().entries.map((entry) {
+            final isFirst = entry.key == 0;
+            final s = entry.value;
+            final dataIdx = s.x.round();
+            final name = seriesNames[s.barIndex];
+            final color = seriesColors[s.barIndex];
+            final valueText = '$name: ${_fmtK(s.y.toInt())}';
+            if (isFirst && dataIdx >= 0 && dataIdx < data.length) {
+              return LineTooltipItem(
+                '${_fmtTooltipTime(data[dataIdx].createdAtTs)}\n',
+                const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10, fontWeight: FontWeight.w400),
+                children: [TextSpan(text: valueText, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600))],
+              );
+            }
+            return LineTooltipItem(valueText, TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600));
           }).toList(),
         ),
       ),
       gridData: FlGridData(
         drawHorizontalLine: true,
         drawVerticalLine: false,
-        horizontalInterval: null,
+        horizontalInterval: interval,
         getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
       ),
-      titlesData: const FlTitlesData(
-        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      titlesData: FlTitlesData(
+        leftTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 38,
+            interval: interval,
+            getTitlesWidget: (value, meta) {
+              if (value == 0 || value > maxY) return const SizedBox.shrink();
+              return SideTitleWidget(
+                meta: meta,
+                space: 4,
+                child: Text(_fmtK(value.toInt()), style: _axisStyle),
+              );
+            },
+          ),
+        ),
         rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
         topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        bottomTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 20,
+            interval: step.toDouble(),
+            getTitlesWidget: (value, meta) {
+              final idx = value.round();
+              if (idx < 0 || idx >= data.length || value != idx.toDouble()) {
+                return const SizedBox.shrink();
+              }
+              return SideTitleWidget(
+                meta: meta,
+                space: 4,
+                child: Text(_fmtAxisTime(data[idx].createdAtTs, sameDay), style: _axisStyle),
+              );
+            },
+          ),
+        ),
       ),
       borderData: FlBorderData(show: false),
       lineBarsData: [
@@ -573,7 +687,20 @@ class _TokenChart extends StatelessWidget {
   }
 
   BarChartData _buildBarData(List<UsageEntry> data) {
+    double rawMax = 0;
+    for (final e in data) {
+      final t = (e.inputTokens + e.outputTokens).toDouble();
+      if (t > rawMax) rawMax = t;
+    }
+    final maxY = _calcMaxY(rawMax);
+    final interval = _niceInterval(maxY);
+
+    final sameDay = data.first.createdAt.day == data.last.createdAt.day &&
+        data.first.createdAt.month == data.last.createdAt.month;
+    final step = _xStep(data.length);
+
     return BarChartData(
+      maxY: maxY,
       barTouchData: BarTouchData(
         touchTooltipData: BarTouchTooltipData(
           getTooltipColor: (_) => Colors.white,
@@ -589,13 +716,45 @@ class _TokenChart extends StatelessWidget {
       gridData: FlGridData(
         drawHorizontalLine: true,
         drawVerticalLine: false,
+        horizontalInterval: interval,
         getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
       ),
-      titlesData: const FlTitlesData(
-        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      titlesData: FlTitlesData(
+        leftTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 38,
+            interval: interval,
+            getTitlesWidget: (value, meta) {
+              if (value == 0 || value > maxY) return const SizedBox.shrink();
+              return SideTitleWidget(
+                meta: meta,
+                space: 4,
+                child: Text(_fmtK(value.toInt()), style: _axisStyle),
+              );
+            },
+          ),
+        ),
         rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
         topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        bottomTitles: AxisTitles(
+          sideTitles: SideTitles(
+            showTitles: true,
+            reservedSize: 20,
+            interval: step.toDouble(),
+            getTitlesWidget: (value, meta) {
+              final idx = value.round();
+              if (idx < 0 || idx >= data.length || value != idx.toDouble()) {
+                return const SizedBox.shrink();
+              }
+              return SideTitleWidget(
+                meta: meta,
+                space: 4,
+                child: Text(_fmtAxisTime(data[idx].createdAtTs, sameDay), style: _axisStyle),
+              );
+            },
+          ),
+        ),
       ),
       borderData: FlBorderData(show: false),
       barGroups: List.generate(
@@ -631,6 +790,18 @@ class _LatencyChart extends StatelessWidget {
     }
 
     final data = withLatency.length > 30 ? withLatency.sublist(withLatency.length - 30) : withLatency;
+
+    double rawMax = 0;
+    for (final e in data) {
+      if (e.latencyMs > rawMax) rawMax = e.latencyMs.toDouble();
+    }
+    final maxY = _calcMaxY(rawMax);
+    final interval = _niceInterval(maxY);
+
+    final sameDay = data.first.createdAt.day == data.last.createdAt.day &&
+        data.first.createdAt.month == data.last.createdAt.month;
+    final step = _xStep(data.length);
+
     final spots = List.generate(
       data.length,
       (i) => FlSpot(i.toDouble(), data[i].latencyMs.toDouble()),
@@ -638,29 +809,86 @@ class _LatencyChart extends StatelessWidget {
 
     return LineChart(
       LineChartData(
+        minY: 0,
+        maxY: maxY,
         lineTouchData: LineTouchData(
           handleBuiltInTouches: true,
+          getTouchedSpotIndicator: (barData, spotIndexes) => spotIndexes.map((_) {
+            return TouchedSpotIndicatorData(
+              FlLine(color: const Color(0xFFF59E0B).withAlpha(60), strokeWidth: 1),
+              FlDotData(
+                getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                  radius: 3,
+                  color: Colors.white,
+                  strokeColor: const Color(0xFFF59E0B),
+                  strokeWidth: 2,
+                ),
+              ),
+            );
+          }).toList(),
           touchTooltipData: LineTouchTooltipData(
             getTooltipColor: (_) => Colors.white,
             tooltipRoundedRadius: 8,
             tooltipBorder: const BorderSide(color: Color(0xFFE5E7EB)),
             tooltipPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
-              '${s.y.toInt()} ms',
-              const TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.w600),
-            )).toList(),
+            getTooltipItems: (spots) => spots.asMap().entries.map((entry) {
+              final isFirst = entry.key == 0;
+              final s = entry.value;
+              final dataIdx = s.x.round();
+              final valueText = '${s.y.toInt()} ms';
+              if (isFirst && dataIdx >= 0 && dataIdx < data.length) {
+                return LineTooltipItem(
+                  '${_fmtTooltipTime(data[dataIdx].createdAtTs)}\n',
+                  const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10, fontWeight: FontWeight.w400),
+                  children: [TextSpan(text: valueText, style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.w600))],
+                );
+              }
+              return LineTooltipItem(valueText, const TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.w600));
+            }).toList(),
           ),
         ),
         gridData: FlGridData(
           drawHorizontalLine: true,
           drawVerticalLine: false,
+          horizontalInterval: interval,
           getDrawingHorizontalLine: (_) => FlLine(color: Colors.black.withAlpha(15), strokeWidth: 1),
         ),
-        titlesData: const FlTitlesData(
-          leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 42,
+              interval: interval,
+              getTitlesWidget: (value, meta) {
+                if (value == 0 || value > maxY) return const SizedBox.shrink();
+                return SideTitleWidget(
+                  meta: meta,
+                  space: 4,
+                  child: Text('${value.toInt()}ms', style: _axisStyle),
+                );
+              },
+            ),
+          ),
           rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
           topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 20,
+              interval: step.toDouble(),
+              getTitlesWidget: (value, meta) {
+                final idx = value.round();
+                if (idx < 0 || idx >= data.length || value != idx.toDouble()) {
+                  return const SizedBox.shrink();
+                }
+                return SideTitleWidget(
+                  meta: meta,
+                  space: 4,
+                  child: Text(_fmtAxisTime(data[idx].createdAtTs, sameDay), style: _axisStyle),
+                );
+              },
+            ),
+          ),
         ),
         borderData: FlBorderData(show: false),
         lineBarsData: [
