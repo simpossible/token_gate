@@ -43,20 +43,6 @@ func (d *debugLogger) printf(format string, args ...interface{}) {
 	d.logger.Printf(format, args...)
 }
 
-func maskSensitive(v string) string {
-	// Strip "Bearer " prefix if present before masking
-	prefix := ""
-	raw := v
-	if strings.HasPrefix(v, "Bearer ") {
-		prefix = "Bearer "
-		raw = v[len("Bearer "):]
-	}
-	if len(raw) <= 14 {
-		return prefix + "***"
-	}
-	return prefix + raw[:10] + "..." + raw[len(raw)-4:]
-}
-
 func formatHeaders(headers http.Header) string {
 	var sb strings.Builder
 	keys := make([]string, 0, len(headers))
@@ -65,13 +51,8 @@ func formatHeaders(headers http.Header) string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		kl := strings.ToLower(k)
 		for _, v := range headers[k] {
-			display := v
-			if kl == "authorization" || kl == "x-api-key" || kl == "anthropic-api-key" {
-				display = maskSensitive(v)
-			}
-			fmt.Fprintf(&sb, "  %-35s %s\n", k+":", display)
+			fmt.Fprintf(&sb, "  %-35s %s\n", k+":", v)
 		}
 	}
 	return sb.String()
