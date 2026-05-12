@@ -4,44 +4,53 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'api_service.dart';
+import 'event_service.dart';
 
 class TrayService with TrayListener {
   final ApiService _api;
-  Timer? _timer;
-  int _lastTs = DateTime.now().millisecondsSinceEpoch;
+  final EventService _eventService;
+  StreamSubscription? _subscription;
+  int _totalInput = 0;
+  int _totalOutput = 0;
 
-  TrayService(this._api);
+  TrayService(this._api, this._eventService);
 
   Future<void> init() async {
     trayManager.addListener(this);
     await trayManager.setIcon('assets/icons/tray_icon.png');
     await _buildMenu();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshTitle());
-  }
 
-  Future<void> _refreshTitle() async {
+    // Fetch initial totals
     try {
       final agents = await _api.listAgents();
-      int input = 0;
-      int output = 0;
-      final now = DateTime.now().millisecondsSinceEpoch;
-
       for (final agent in agents) {
         final id = agent.activeConfigId;
         if (id == null) continue;
-        final entries = await _api.getUsageDelta(id, _lastTs);
-        for (final e in entries) {
-          input += e.inputTokens;
-          output += e.outputTokens;
-        }
+        final stats = await _api.getUsageStats(id);
+        _totalInput += stats.inputTokens;
+        _totalOutput += stats.outputTokens;
       }
+      _updateTitle();
+    } catch (_) {}
 
-      _lastTs = now;
-      if (input > 0 || output > 0) {
-        await trayManager.setTitle('↑${_fmt(input)} ↓${_fmt(output)}');
-      }
-    } catch (_) {
-      // daemon may be unavailable
+    // Subscribe to total_token_change events
+    final stream = _eventService.connect('event');
+    _subscription = stream.listen(_onEvent);
+  }
+
+  void _onEvent(EventMessage msg) {
+    if (msg.type == 'total_token_change') {
+      final addedIn = msg.data['added_in_tokens'] as int? ?? 0;
+      final addedOut = msg.data['added_out_tokens'] as int? ?? 0;
+      _totalInput += addedIn;
+      _totalOutput += addedOut;
+      _updateTitle();
+    }
+  }
+
+  Future<void> _updateTitle() async {
+    if (_totalInput > 0 || _totalOutput > 0) {
+      await trayManager.setTitle('↑${_fmt(_totalInput)} ↓${_fmt(_totalOutput)}');
     }
   }
 
@@ -78,7 +87,8 @@ class TrayService with TrayListener {
   }
 
   void dispose() {
-    _timer?.cancel();
+    _subscription?.cancel();
+    _eventService.disconnect('event_');
     trayManager.removeListener(this);
   }
 }

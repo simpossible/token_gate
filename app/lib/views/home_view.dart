@@ -7,6 +7,7 @@ import '../providers/providers.dart';
 import 'config_detail.dart';
 import 'config_form.dart';
 import 'config_list.dart';
+import 'log_panel.dart';
 
 class HomeView extends ConsumerStatefulWidget {
   const HomeView({super.key});
@@ -19,6 +20,9 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
   // edit mode: null = no sheet open; non-null = config being edited (or sentinel for create)
   bool _showForm = false;
   TokenConfig? _editingConfig;
+  bool _showLogPanel = false;
+  String? _logPanelConfigId;
+  String? _logPanelConfigName;
 
   @override
   void initState() {
@@ -106,6 +110,13 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
                               config: selectedConfig,
                               onEdit: () => _openEdit(selectedConfig),
                               onDeleted: () {},
+                              onShowLog: () {
+                                setState(() {
+                                  _showLogPanel = true;
+                                  _logPanelConfigId = selectedConfig.id;
+                                  _logPanelConfigName = selectedConfig.name;
+                                });
+                              },
                             )
                           : _EmptyDetail(onCreateTap: _openCreate),
                     ),
@@ -114,6 +125,26 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
               ),
             ],
           ),
+
+          // Log panel overlay (right side)
+          if (_showLogPanel && _logPanelConfigId != null)
+            Positioned(
+              top: 52,
+              right: 0,
+              bottom: 0,
+              child: LogPanel(
+                configId: _logPanelConfigId!,
+                configName: _logPanelConfigName ?? '',
+                eventService: ref.read(eventServiceProvider),
+                onClose: () {
+                  setState(() {
+                    _showLogPanel = false;
+                    _logPanelConfigId = null;
+                    _logPanelConfigName = null;
+                  });
+                },
+              ),
+            ),
 
           // ── Modal overlay for create / edit ─────────────────────────────
           if (_showForm) ...[

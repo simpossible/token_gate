@@ -21,6 +21,7 @@ import (
 	"token_gate/internal/company"
 	"token_gate/internal/config"
 	"token_gate/internal/database"
+	"token_gate/internal/event"
 	"token_gate/internal/latency"
 	"token_gate/internal/model"
 	"token_gate/internal/proxy"
@@ -301,8 +302,10 @@ func startServers() {
 		}
 	}()
 
-	proxyHandler := proxy.NewProxy(cache, db, latencyCache)
-	apiHandler := api.NewAPI(db, cache, processors, latencyCache, companyMgr)
+	eventBus := event.NewEventBus()
+
+	proxyHandler := proxy.NewProxy(cache, db, latencyCache, eventBus)
+	apiHandler := api.NewAPI(db, cache, processors, latencyCache, companyMgr, eventBus)
 
 	proxyServer := &http.Server{Addr: "127.0.0.1:12121", Handler: proxyHandler}
 	apiServer := &http.Server{Addr: "127.0.0.1:12122", Handler: apiHandler.Routes()}

@@ -13,6 +13,7 @@ import (
 
 	"token_gate/internal/config"
 	"token_gate/internal/database"
+	"token_gate/internal/event"
 	"token_gate/internal/latency"
 )
 
@@ -20,11 +21,12 @@ type Proxy struct {
 	cache        *config.ActiveConfigCache
 	db           *database.DB
 	latencyCache *latency.Cache
+	eventBus     *event.EventBus
 	debug        *debugLogger
 }
 
-func NewProxy(cache *config.ActiveConfigCache, db *database.DB, latencyCache *latency.Cache) *Proxy {
-	return &Proxy{cache: cache, db: db, latencyCache: latencyCache, debug: newDebugLogger()}
+func NewProxy(cache *config.ActiveConfigCache, db *database.DB, latencyCache *latency.Cache, eventBus *event.EventBus) *Proxy {
+	return &Proxy{cache: cache, db: db, latencyCache: latencyCache, eventBus: eventBus, debug: newDebugLogger()}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +90,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[PROXY] forwarding to: %s", targetURL)
+
+	// Publish gate_log: request received
+	if p.eventBus.HasSubscribers("log", tc.ID) {
+		msg := fmt.Sprintf("%s → %s %s model=%s (%d bytes)", time.Now().Format("15:04:05"), r.Method, realPath, tc.Model, len(bodyBytes))
+		p.eventBus.Publish(event.Event{
+			ConnType: "log",
+			Type:     "gate_log",
+			ConfigID: tc.ID,
+			Payload:  map[string]string{"message": msg},
+		})
+	}
 
 	// Create forwarded request
 	var bodyReader io.Reader
@@ -178,9 +191,9 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 			if data == "[DONE]" {
 				continue
 			}
-			var event map[string]interface{}
-			if err := json.Unmarshal([]byte(data), &event); err == nil {
-				if usage, ok := event["usage"].(map[string]interface{}); ok {
+			var evt map[string]interface{}
+			if err := json.Unmarshal([]byte(data), &evt); err == nil {
+				if usage, ok := evt["usage"].(map[string]interface{}); ok {
 					if it, ok := usage["input_tokens"].(float64); ok {
 						lastUsageInput = int(it)
 					}
@@ -188,7 +201,7 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 						lastUsageOutput = int(ot)
 					}
 				}
-				if msg, ok := event["message"].(map[string]interface{}); ok {
+				if msg, ok := evt["message"].(map[string]interface{}); ok {
 					if usage, ok := msg["usage"].(map[string]interface{}); ok {
 						if it, ok := usage["input_tokens"].(float64); ok {
 							lastUsageInput = int(it)
@@ -209,7 +222,19 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 				log.Printf("[PROXY] record usage error: %v", err)
 			}
 			p.latencyCache.Set(tokenID, ttfbMs)
+			p.publishUsageEvents(tokenID, ttfbMs, lastUsageInput, lastUsageOutput, true)
 		}()
+	}
+
+	// Publish gate_log: SSE response complete
+	if p.eventBus.HasSubscribers("log", tokenID) {
+		msg := fmt.Sprintf("%s ← ↑%d ↓%d %dms streaming", time.Now().Format("15:04:05"), lastUsageInput, lastUsageOutput, ttfbMs)
+		p.eventBus.Publish(event.Event{
+			ConnType: "log",
+			Type:     "gate_log",
+			ConfigID: tokenID,
+			Payload:  map[string]string{"message": msg},
+		})
 	}
 
 	log.Printf("[PROXY] SSE stream complete: agent=%s, ttfb=%dms, input=%d, output=%d", agentType, ttfbMs, lastUsageInput, lastUsageOutput)
@@ -241,6 +266,46 @@ func (p *Proxy) recordUsage(body []byte, tokenID, agentType string, latencyMs in
 			log.Printf("[PROXY] record usage error: %v", err)
 		}
 		p.latencyCache.Set(tokenID, latencyMs)
+		p.publishUsageEvents(tokenID, latencyMs, inputTokens, outputTokens, false)
+
+		// Publish gate_log: non-SSE response complete
+		if p.eventBus.HasSubscribers("log", tokenID) {
+			msg := fmt.Sprintf("%s ← ↑%d ↓%d %dms", time.Now().Format("15:04:05"), inputTokens, outputTokens, latencyMs)
+			p.eventBus.Publish(event.Event{
+				ConnType: "log",
+				Type:     "gate_log",
+				ConfigID: tokenID,
+				Payload:  map[string]string{"message": msg},
+			})
+		}
+	}
+}
+
+func (p *Proxy) publishUsageEvents(tokenID string, latencyMs int64, inputTokens, outputTokens int, isStreaming bool) {
+	// usage_new: per-config
+	if p.eventBus.HasSubscribers("event", tokenID) {
+		p.eventBus.Publish(event.Event{
+			ConnType: "event",
+			Type:     "usage_new",
+			ConfigID: tokenID,
+			Payload: map[string]interface{}{
+				"input_tokens":  inputTokens,
+				"output_tokens": outputTokens,
+				"latency_ms":    latencyMs,
+			},
+		})
+	}
+
+	// total_token_change: global
+	if p.eventBus.HasSubscribers("event", "") {
+		p.eventBus.Publish(event.Event{
+			ConnType: "event",
+			Type:     "total_token_change",
+			Payload: map[string]interface{}{
+				"added_in_tokens":  inputTokens,
+				"added_out_tokens": outputTokens,
+			},
+		})
 	}
 }
 

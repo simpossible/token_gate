@@ -96,6 +96,34 @@ When a config is activated, the flow is:
 2. Cache: `cache.Set(agentType, tokenConfig)`
 3. `AgentProcessor.OnActivate(config)` called — for `claude_code` this writes `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY = "placeholder"` into `~/.claude/settings.json`
 
+## Real-Time Event System
+
+Go backend pushes events to Flutter via SSE (Server-Sent Events). `internal/event/event.go` implements an `EventBus` with pub/sub semantics.
+
+**Connection types (separate SSE connections):**
+
+| connType | SSE endpoint | Events | Subscriber |
+|----------|-------------|--------|-----------|
+| `event` | `GET /api/events?type=event&config_id=xxx` | `usage_new` | ConfigDetail (auto-refresh stats/charts) |
+| `event` | `GET /api/events?type=event` | `total_token_change` | TrayService (replaces 5s polling) |
+| `log` | `GET /api/events?type=log&config_id=xxx` | `gate_log` | Log panel (real-time request/response log) |
+
+**Event payloads:**
+
+- `gate_log`: `{message: "14:30:01 → POST /v1/messages model=xxx (1234 bytes)"}` — human-readable string, pushed on request received (`→`) and response complete (`←`)
+- `usage_new`: `{input_tokens, output_tokens, latency_ms}` — pushed after usage recorded in DB
+- `total_token_change`: `{added_in_tokens, added_out_tokens}` — global, for tray title update
+
+**Key design decisions:**
+
+- `HasSubscribers(connType, configID)` is called before constructing/publishing events — zero overhead when no one is listening
+- Publish uses non-blocking channel send (`select + default`) — slow clients never block the proxy hot path
+- Each subscriber has a buffered channel (cap 64) — events dropped if client can't keep up
+- Flutter's `EventService` manages connections by key (`connType_configId`) with auto-reconnect (3s delay)
+- ConfigDetail connects to `event` type on mount, disconnects on dispose
+- Log panel connects to `log` type on open, disconnects on close
+- TrayService connects to `event` type (no config_id) on init, disconnects on dispose
+
 ## Extending to New Agent Types
 
 Implement `agent.AgentProcessor` (in `internal/agent/processor.go`) and register it in `main.go`:

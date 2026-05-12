@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"token_gate/internal/company"
 	"token_gate/internal/config"
 	"token_gate/internal/database"
+	"token_gate/internal/event"
 	"token_gate/internal/latency"
 	"token_gate/internal/model"
 )
@@ -22,14 +24,15 @@ type API struct {
 	processors   map[string]agent.AgentProcessor
 	latencyCache *latency.Cache
 	companyMgr   *company.Manager
+	eventBus     *event.EventBus
 }
 
-func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor, latencyCache *latency.Cache, companyMgr *company.Manager) *API {
+func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor, latencyCache *latency.Cache, companyMgr *company.Manager, eventBus *event.EventBus) *API {
 	pm := make(map[string]agent.AgentProcessor)
 	for _, p := range processors {
 		pm[p.GetType()] = p
 	}
-	return &API{db: db, cache: cache, processors: pm, latencyCache: latencyCache, companyMgr: companyMgr}
+	return &API{db: db, cache: cache, processors: pm, latencyCache: latencyCache, companyMgr: companyMgr, eventBus: eventBus}
 }
 
 func (a *API) Routes() http.Handler {
@@ -40,6 +43,7 @@ func (a *API) Routes() http.Handler {
 	r.Get("/api/configs", a.listConfigs)
 	r.Get("/api/agents", a.listAgents)
 	r.Get("/api/companies", a.getCompanies)
+	r.Get("/api/events", a.handleEvents)
 	r.Route("/api/configs/{id}", func(r chi.Router) {
 		r.Get("/", a.getConfig)
 		r.Put("/", a.updateConfig)
@@ -82,6 +86,51 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// SSE endpoint for real-time event streaming
+func (a *API) handleEvents(w http.ResponseWriter, r *http.Request) {
+	connType := r.URL.Query().Get("type")
+	if connType != "event" && connType != "log" {
+		writeError(w, http.StatusBadRequest, "type must be 'event' or 'log'")
+		return
+	}
+	configID := r.URL.Query().Get("config_id")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	sub := a.eventBus.Subscribe(connType, configID)
+	defer a.eventBus.Unsubscribe(sub)
+
+	log.Printf("[API] SSE client connected: type=%s, config_id=%s", connType, configID)
+
+	// Send initial connection confirmation
+	fmt.Fprintf(w, "event: connected\ndata: {\"type\":\"%s\",\"config_id\":\"%s\"}\n\n", connType, configID)
+	flusher.Flush()
+
+	for {
+		select {
+		case evt, ok := <-sub.Channel():
+			if !ok {
+				return
+			}
+			data := evt.ToJSON()
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+			flusher.Flush()
+		case <-r.Context().Done():
+			log.Printf("[API] SSE client disconnected: type=%s, config_id=%s", connType, configID)
+			return
+		}
+	}
 }
 
 func (a *API) createConfig(w http.ResponseWriter, r *http.Request) {

@@ -8,18 +8,21 @@ import '../models/usage_entry.dart';
 import '../models/usage_stats.dart';
 import '../services/api_service.dart';
 import '../services/backend_service.dart';
+import '../services/event_service.dart';
 import '../services/tray_service.dart';
 
 // ── Core services ──────────────────────────────────────────────────────────
 
 final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 
+final eventServiceProvider = Provider<EventService>((ref) => EventService());
+
 final backendServiceProvider = Provider<BackendService>(
   (ref) => BackendService(ref.read(apiServiceProvider)),
 );
 
 final trayServiceProvider = Provider<TrayService>(
-  (ref) => TrayService(ref.read(apiServiceProvider)),
+  (ref) => TrayService(ref.read(apiServiceProvider), ref.read(eventServiceProvider)),
 );
 
 // ── Selected state ─────────────────────────────────────────────────────────

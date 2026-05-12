@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -80,12 +81,14 @@ class ConfigDetail extends ConsumerStatefulWidget {
   final TokenConfig config;
   final VoidCallback onEdit;
   final VoidCallback onDeleted;
+  final VoidCallback? onShowLog;
 
   const ConfigDetail({
     super.key,
     required this.config,
     required this.onEdit,
     required this.onDeleted,
+    this.onShowLog,
   });
 
   @override
@@ -95,6 +98,33 @@ class ConfigDetail extends ConsumerStatefulWidget {
 class _ConfigDetailState extends ConsumerState<ConfigDetail> {
   bool _showLineChart = true;
   _TimeRange _timeRange = _TimeRange.today;
+  StreamSubscription? _eventSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribeEvents();
+  }
+
+  void _subscribeEvents() {
+    final eventService = ref.read(eventServiceProvider);
+    final configId = widget.config.id;
+    final stream = eventService.connect('event', configId: configId);
+    _eventSubscription = stream.listen((msg) {
+      if (msg.type == 'usage_new') {
+        ref.invalidate(usageStatsProvider(configId));
+        ref.invalidate(usagesProvider(configId));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _eventSubscription?.cancel();
+    final configId = widget.config.id;
+    ref.read(eventServiceProvider).disconnect('event_$configId');
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -154,6 +184,12 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
                 tooltip: '编辑',
                 onPressed: widget.onEdit,
               ),
+              if (widget.onShowLog != null)
+                IconButton(
+                  icon: const Icon(Icons.terminal, size: 18),
+                  tooltip: '实时日志',
+                  onPressed: widget.onShowLog,
+                ),
               IconButton(
                 icon: const Icon(Icons.delete_outline,
                     size: 18, color: Colors.red),
