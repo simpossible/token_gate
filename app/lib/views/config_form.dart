@@ -120,7 +120,7 @@ class _ConfigFormState extends ConsumerState<ConfigForm> {
                           controller: _apiKeyCtrl,
                           decoration: _deco('sk-ant-...'),
                           style: _fieldTextStyle,
-                          obscureText: true,
+
                           validator: (v) =>
                               v == null || v.isEmpty ? '请输入 API Key' : null,
                         ),
