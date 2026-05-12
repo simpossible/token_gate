@@ -58,11 +58,7 @@ class _LogPanelState extends State<LogPanel> {
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       }
     });
   }
@@ -78,7 +74,7 @@ class _LogPanelState extends State<LogPanel> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 360,
+      width: 720,
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E2E).withValues(alpha: 0.95),
         border: Border(left: BorderSide(color: Colors.white.withAlpha(30))),
