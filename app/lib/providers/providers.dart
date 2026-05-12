@@ -22,7 +22,7 @@ final backendServiceProvider = Provider<BackendService>(
 );
 
 final trayServiceProvider = Provider<TrayService>(
-  (ref) => TrayService(ref.read(apiServiceProvider), ref.read(eventServiceProvider)),
+  (ref) => TrayService(ref.read(eventServiceProvider)),
 );
 
 // ── Selected state ─────────────────────────────────────────────────────────

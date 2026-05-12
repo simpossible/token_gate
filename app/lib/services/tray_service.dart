@@ -3,35 +3,21 @@ import 'dart:async';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'api_service.dart';
 import 'event_service.dart';
 
 class TrayService with TrayListener {
-  final ApiService _api;
   final EventService _eventService;
   StreamSubscription? _subscription;
-  int _totalInput = 0;
-  int _totalOutput = 0;
+  int _deltaInput = 0;
+  int _deltaOutput = 0;
+  Timer? _clearTimer;
 
-  TrayService(this._api, this._eventService);
+  TrayService(this._eventService);
 
   Future<void> init() async {
     trayManager.addListener(this);
     await trayManager.setIcon('assets/icons/tray_icon.png');
     await _buildMenu();
-
-    // Fetch initial totals
-    try {
-      final agents = await _api.listAgents();
-      for (final agent in agents) {
-        final id = agent.activeConfigId;
-        if (id == null) continue;
-        final stats = await _api.getUsageStats(id);
-        _totalInput += stats.inputTokens;
-        _totalOutput += stats.outputTokens;
-      }
-      _updateTitle();
-    } catch (_) {}
 
     // Subscribe to total_token_change events
     final stream = _eventService.connect('event');
@@ -42,15 +28,25 @@ class TrayService with TrayListener {
     if (msg.type == 'total_token_change') {
       final addedIn = msg.data['added_in_tokens'] as int? ?? 0;
       final addedOut = msg.data['added_out_tokens'] as int? ?? 0;
-      _totalInput += addedIn;
-      _totalOutput += addedOut;
+      _deltaInput += addedIn;
+      _deltaOutput += addedOut;
       _updateTitle();
+
+      // Reset clear timer on each event
+      _clearTimer?.cancel();
+      _clearTimer = Timer(const Duration(seconds: 3), () {
+        _deltaInput = 0;
+        _deltaOutput = 0;
+        _updateTitle();
+      });
     }
   }
 
   Future<void> _updateTitle() async {
-    if (_totalInput > 0 || _totalOutput > 0) {
-      await trayManager.setTitle('↑${_fmt(_totalInput)} ↓${_fmt(_totalOutput)}');
+    if (_deltaInput > 0 || _deltaOutput > 0) {
+      await trayManager.setTitle('↑${_fmt(_deltaInput)} ↓${_fmt(_deltaOutput)}');
+    } else {
+      await trayManager.setTitle('');
     }
   }
 
@@ -87,6 +83,7 @@ class TrayService with TrayListener {
   }
 
   void dispose() {
+    _clearTimer?.cancel();
     _subscription?.cancel();
     _eventService.disconnect('event_');
     trayManager.removeListener(this);
