@@ -463,9 +463,9 @@ func (db *DB) GetUsage(tokenID string) (*model.UsageResponse, error) {
 	}
 
 	err := db.QueryRow(
-		"SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COUNT(*) FROM usage WHERE token_id = ?",
+		"SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COUNT(*), COALESCE(AVG(latency_ms),0) FROM usage WHERE token_id = ?",
 		tokenID,
-	).Scan(&resp.TotalInputTokens, &resp.TotalOutputTokens, &resp.RecordsCount)
+	).Scan(&resp.TotalInputTokens, &resp.TotalOutputTokens, &resp.RecordsCount, &resp.AvgLatencyMs)
 	if err != nil {
 		return nil, err
 	}

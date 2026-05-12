@@ -63,13 +63,13 @@ type UpdateConfigRequest struct {
 }
 
 type UsageResponse struct {
-	TokenID          string                    `json:"token_id"`
-	TotalInputTokens int                       `json:"total_input_tokens"`
-	TotalOutputTokens int                      `json:"total_output_tokens"`
-	RecordsCount     int                       `json:"records_count"`
-	ByAgent          map[string]*AgentUsage    `json:"by_agent"`
-	DailyUsage       []DailyUsage              `json:"daily_usage"`
-	LatestCreatedAtTs int64                    `json:"latest_created_at_ts,omitempty"`
+	TokenID           string                 `json:"token_id"`
+	TotalInputTokens  int                    `json:"total_input_tokens"`
+	TotalOutputTokens int                    `json:"total_output_tokens"`
+	RecordsCount      int                    `json:"records_count"`
+	ByAgent           map[string]*AgentUsage `json:"by_agent"`
+	DailyUsage        []DailyUsage           `json:"daily_usage"`
+	LatestCreatedAtTs int64                  `json:"latest_created_at_ts,omitempty"`
 }
 
 type AgentUsage struct {

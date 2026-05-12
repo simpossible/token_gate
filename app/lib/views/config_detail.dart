@@ -103,7 +103,16 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
           statsAsync.when(
             loading: () => const _StatsRow(stats: UsageStats.empty),
             error: (e, st) => const _StatsRow(stats: UsageStats.empty),
-            data: (stats) => _StatsRow(stats: stats),
+            data: (stats) {
+              final usages = usagesAsync.valueOrNull ?? [];
+              final avgLatencyMs = usages.isEmpty
+                  ? 0
+                  : (usages.map((e) => e.latencyMs).reduce((a, b) => a + b) /
+                          usages.length)
+                      .round();
+              return _StatsRow(
+                  stats: stats.copyWith(avgLatencyMs: avgLatencyMs));
+            },
           ),
           const SizedBox(height: 20),
 
@@ -266,6 +275,7 @@ class _StatsRow extends StatelessWidget {
       ('请求数', '${stats.requests}'),
       ('输入 Tokens', _fmt(stats.inputTokens)),
       ('输出 Tokens', _fmt(stats.outputTokens)),
+      ('平均时延', _fmtLatency(stats.avgLatencyMs)),
     ];
 
     return Row(
@@ -279,6 +289,11 @@ class _StatsRow extends StatelessWidget {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
     return '$n';
+  }
+
+  String _fmtLatency(int ms) {
+    if (ms <= 0) return '-';
+    return '${ms}ms';
   }
 }
 
