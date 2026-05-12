@@ -299,6 +299,7 @@ func startServers() {
 
 	processors := []agent.AgentProcessor{
 		agent.NewClaudeCodeProcessor(),
+			agent.NewCodexProcessor(),
 	}
 
 	cache := config.NewCache(db)
@@ -308,7 +309,7 @@ func startServers() {
 
 	hasActive := false
 	for _, p := range processors {
-		if vc, _ := db.GetActiveConfig(p.GetType()); vc != nil {
+		if tc, _ := db.GetActiveTokenConfigByAgentType(p.GetType()); tc != nil {
 			hasActive = true
 			break
 		}
@@ -408,16 +409,21 @@ func readClaudeSettings() (apiKey, baseURL, modelStr string) {
 }
 
 func activateConfigForProcessors(tc *model.TokenConfig, db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
+	// Find the processor matching this config's agent_type
 	for _, p := range processors {
-		if err := db.ActivateConfig(tc.ID, p.GetType()); err != nil {
-			log.Printf("[MAIN] activate config failed: agent=%s, error=%v", p.GetType(), err)
-			continue
+		if p.GetType() == tc.AgentType {
+			_, _, err := db.ActivateTokenConfig(tc.ID)
+			if err != nil {
+				log.Printf("[MAIN] activate config failed: agent=%s, error=%v", p.GetType(), err)
+				return
+			}
+			cache.Set(p.GetType(), tc)
+			if err := p.OnActivate(tc); err != nil {
+				log.Printf("[MAIN] OnActivate failed: agent=%s, error=%v", p.GetType(), err)
+			}
+			log.Printf("[MAIN] activated config: name=%s, id=%s, agent=%s", tc.Name, tc.ID, p.GetType())
+			return
 		}
-		cache.Set(p.GetType(), tc)
-		if err := p.OnActivate(tc); err != nil {
-			log.Printf("[MAIN] OnActivate failed: agent=%s, error=%v", p.GetType(), err)
-		}
-		log.Printf("[MAIN] activated config: name=%s, id=%s, agent=%s", tc.Name, tc.ID, p.GetType())
 	}
 }
 
@@ -431,7 +437,7 @@ func restoreOrImportConfig(db *database.DB, cache *config.ActiveConfigCache, pro
 	var target *model.TokenConfig
 
 	if hasRealSettings {
-		tc, err := db.FindConfigByURLAndKey(baseURL, apiKey)
+		tc, err := db.FindConfigByURLAndKey(baseURL, apiKey, "claude_code")
 		if err != nil {
 			log.Printf("[MAIN] restore: find by url+key error: %v", err)
 		}
@@ -442,7 +448,7 @@ func restoreOrImportConfig(db *database.DB, cache *config.ActiveConfigCache, pro
 	}
 
 	if target == nil {
-		tc, err := db.FindMostRecentlyUsedConfig()
+		tc, err := db.FindMostRecentlyUsedConfig("claude_code")
 		if err != nil {
 			log.Printf("[MAIN] restore: find most recent error: %v", err)
 		}
@@ -492,12 +498,9 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 
 	for _, p := range processors {
 		if p.GetType() == "claude_code" {
-			vc, _ := db.GetActiveConfig("claude_code")
-			if vc != nil {
-				tc, _ := db.GetTokenConfig(vc.TokenID)
-				if tc != nil {
-					p.OnActivate(tc)
-				}
+			tc, _ := db.GetActiveTokenConfigByAgentType("claude_code")
+			if tc != nil {
+				p.OnActivate(tc)
 			}
 		}
 	}
@@ -506,18 +509,18 @@ func importExistingConfig(db *database.DB, cache *config.ActiveConfigCache, proc
 }
 
 func cleanupAllConfigs(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor) {
-	validConfigs, err := db.ListActiveConfigs()
+	activeConfigs, err := db.ListActiveTokenConfigs()
 	if err != nil {
 		log.Printf("[MAIN] cleanup: failed to list active configs: %v", err)
 		return
 	}
 
-	if len(validConfigs) == 0 {
+	if len(activeConfigs) == 0 {
 		log.Println("[MAIN] cleanup: no active configs to restore")
 		return
 	}
 
-	log.Printf("[MAIN] cleanup: found %d active configs to restore", len(validConfigs))
+	log.Printf("[MAIN] cleanup: found %d active configs to restore", len(activeConfigs))
 
 	processorMap := make(map[string]agent.AgentProcessor)
 	for _, p := range processors {
@@ -525,36 +528,26 @@ func cleanupAllConfigs(db *database.DB, cache *config.ActiveConfigCache, process
 	}
 
 	var wg sync.WaitGroup
-	for _, vc := range validConfigs {
+	for _, tc := range activeConfigs {
 		wg.Add(1)
-		go func(vc *model.ValidConfig) {
+		go func(tc *model.TokenConfig) {
 			defer wg.Done()
-			log.Printf("[MAIN] cleanup: deactivating config for agent_type=%s", vc.AgentType)
+			log.Printf("[MAIN] cleanup: deactivating config for agent_type=%s", tc.AgentType)
 
-			tc, err := db.GetTokenConfig(vc.TokenID)
-			if err != nil {
-				log.Printf("[MAIN] cleanup: failed to get token config %s: %v", vc.TokenID, err)
-				return
-			}
-			if tc == nil {
-				log.Printf("[MAIN] cleanup: token config %s not found", vc.TokenID)
-				return
-			}
-
-			if processor, ok := processorMap[vc.AgentType]; ok {
+			if processor, ok := processorMap[tc.AgentType]; ok {
 				if err := processor.OnDeactivate(tc); err != nil {
-					log.Printf("[MAIN] cleanup: OnDeactivate failed for agent_type=%s: %v", vc.AgentType, err)
+					log.Printf("[MAIN] cleanup: OnDeactivate failed for agent_type=%s: %v", tc.AgentType, err)
 				} else {
-					log.Printf("[MAIN] cleanup: successfully restored settings for agent_type=%s", vc.AgentType)
+					log.Printf("[MAIN] cleanup: successfully restored settings for agent_type=%s", tc.AgentType)
 				}
 			}
 
-			if err := db.DeactivateConfig(vc.AgentType); err != nil {
-				log.Printf("[MAIN] cleanup: failed to deactivate config from DB for agent_type=%s: %v", vc.AgentType, err)
+			if _, err := db.DeactivateTokenConfig(tc.ID); err != nil {
+				log.Printf("[MAIN] cleanup: failed to deactivate config from DB for agent_type=%s: %v", tc.AgentType, err)
 			}
 
-			cache.Remove(vc.AgentType)
-		}(vc)
+			cache.Remove(tc.AgentType)
+		}(tc)
 	}
 	wg.Wait()
 

@@ -23,7 +23,7 @@ func NewCache(db *database.DB) *ActiveConfigCache {
 
 func (c *ActiveConfigCache) Load() error {
 	log.Printf("[CACHE] Loading active configs from database")
-	validConfigs, err := c.db.ListActiveConfigs()
+	activeConfigs, err := c.db.ListActiveTokenConfigs()
 	if err != nil {
 		log.Printf("[CACHE] Load failed: %v", err)
 		return err
@@ -33,14 +33,9 @@ func (c *ActiveConfigCache) Load() error {
 	defer c.mu.Unlock()
 
 	c.configs = make(map[string]*model.TokenConfig)
-	for _, vc := range validConfigs {
-		tc, err := c.db.GetTokenConfig(vc.TokenID)
-		if err != nil || tc == nil {
-			log.Printf("[CACHE] Warning: could not load config for token_id=%s, agent_type=%s", vc.TokenID, vc.AgentType)
-			continue
-		}
-		c.configs[vc.AgentType] = tc
-		log.Printf("[CACHE] Loaded: agent_type=%s -> config_id=%s, config_name=%s", vc.AgentType, tc.ID, tc.Name)
+	for _, tc := range activeConfigs {
+		c.configs[tc.AgentType] = tc
+		log.Printf("[CACHE] Loaded: agent_type=%s -> config_id=%s, config_name=%s", tc.AgentType, tc.ID, tc.Name)
 	}
 	log.Printf("[CACHE] Load complete: %d active configs", len(c.configs))
 	return nil

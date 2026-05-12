@@ -8,6 +8,8 @@ type TokenConfig struct {
 	URL       string    `json:"url"`
 	APIKey    string    `json:"api_key"`
 	Model     string    `json:"model"`
+	AgentType string    `json:"agent_type"`
+	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -18,13 +20,6 @@ func (c *TokenConfig) MaskedAPIKey() string {
 		return "****"
 	}
 	return k[:4] + "***" + k[len(k)-4:]
-}
-
-type ValidConfig struct {
-	ID        string    `json:"id"`
-	TokenID   string    `json:"token_id"`
-	AgentType string    `json:"agent_type"`
-	CreatedAt time.Time `json:"created_at"`
 }
 
 type Usage struct {
@@ -45,11 +40,6 @@ type LatestLatencyResponse struct {
 	HasData         bool   `json:"has_data"`
 }
 
-type ConfigWithAgents struct {
-	TokenConfig
-	ActiveAgents []string `json:"active_agents"`
-}
-
 type AgentInfo struct {
 	Type             string  `json:"type"`
 	Label            string  `json:"label"`
@@ -58,10 +48,11 @@ type AgentInfo struct {
 }
 
 type CreateConfigRequest struct {
-	Name   string `json:"name"`
-	URL    string `json:"url"`
-	APIKey string `json:"api_key"`
-	Model  string `json:"model"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	APIKey    string `json:"api_key"`
+	Model     string `json:"model"`
+	AgentType string `json:"agent_type"`
 }
 
 type UpdateConfigRequest struct {
@@ -69,10 +60,6 @@ type UpdateConfigRequest struct {
 	URL    *string `json:"url"`
 	APIKey *string `json:"api_key"`
 	Model  *string `json:"model"`
-}
-
-type ActivateRequest struct {
-	AgentType string `json:"agent_type"`
 }
 
 type UsageResponse struct {

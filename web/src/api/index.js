@@ -4,8 +4,9 @@ const api = axios.create({
   baseURL: import.meta.env.DEV ? '' : 'http://127.0.0.1:12122'
 })
 
-export function getConfigs() {
-  return api.get('/api/configs').then(r => r.data.configs)
+export function getConfigs(agentType) {
+  const params = agentType ? { agent_type: agentType } : {}
+  return api.get('/api/configs', { params }).then(r => r.data.configs)
 }
 
 export function getConfig(id) {
@@ -28,12 +29,12 @@ export function getUsage(id) {
   return api.get(`/api/configs/${id}/usage`).then(r => r.data)
 }
 
-export function activateConfig(id, agentType) {
-  return api.post(`/api/configs/${id}/activate`, { agent_type: agentType }).then(r => r.data)
+export function activateConfig(id) {
+  return api.post(`/api/configs/${id}/activate`).then(r => r.data)
 }
 
-export function deactivateConfig(id, agentType) {
-  return api.post(`/api/configs/${id}/deactivate`, { agent_type: agentType }).then(r => r.data)
+export function deactivateConfig(id) {
+  return api.post(`/api/configs/${id}/deactivate`).then(r => r.data)
 }
 
 export function getAgents() {

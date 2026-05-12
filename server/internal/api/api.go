@@ -96,6 +96,16 @@ func (a *API) createConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "all fields are required")
 		return
 	}
+	if req.AgentType == "" {
+		log.Printf("[API] create config: missing agent_type")
+		writeError(w, http.StatusBadRequest, "agent_type is required")
+		return
+	}
+	if _, ok := a.processors[req.AgentType]; !ok {
+		log.Printf("[API] create config: unknown agent type: %s", req.AgentType)
+		writeError(w, http.StatusBadRequest, "unknown agent type: "+req.AgentType)
+		return
+	}
 
 	c, err := a.db.CreateTokenConfig(&req)
 	if err != nil {
@@ -103,31 +113,32 @@ func (a *API) createConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	log.Printf("[API] config created: id=%s, name=%s, url=%s, model=%s", c.ID, c.Name, c.URL, c.Model)
+	log.Printf("[API] config created: id=%s, name=%s, agent_type=%s", c.ID, c.Name, c.AgentType)
 	writeJSON(w, http.StatusCreated, c)
 }
 
 func (a *API) listConfigs(w http.ResponseWriter, r *http.Request) {
-	configs, err := a.db.ListTokenConfigs()
+	agentType := r.URL.Query().Get("agent_type")
+
+	var configs []*model.TokenConfig
+	var err error
+
+	if agentType != "" {
+		configs, err = a.db.ListTokenConfigsByAgentType(agentType)
+	} else {
+		configs, err = a.db.ListTokenConfigs()
+	}
 	if err != nil {
 		log.Printf("[API] list configs failed: %v", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	result := make([]*model.ConfigWithAgents, 0, len(configs))
-	for _, c := range configs {
-		agents, _ := a.db.GetActiveAgentsForConfig(c.ID)
-		if agents == nil {
-			agents = []string{}
-		}
-		result = append(result, &model.ConfigWithAgents{
-			TokenConfig:  *c,
-			ActiveAgents: agents,
-		})
+	if configs == nil {
+		configs = []*model.TokenConfig{}
 	}
-	log.Printf("[API] listed %d configs", len(result))
-	writeJSON(w, http.StatusOK, map[string]interface{}{"configs": result})
+	log.Printf("[API] listed %d configs (agent_type=%s)", len(configs), agentType)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"configs": configs})
 }
 
 func (a *API) getConfig(w http.ResponseWriter, r *http.Request) {
@@ -163,13 +174,12 @@ func (a *API) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If this config is active for any agent, update the cache
-	agents, _ := a.db.GetActiveAgentsForConfig(id)
-	for _, at := range agents {
+	// If this config is active, update the cache
+	if c.IsActive {
 		updated, _ := a.db.GetTokenConfig(id)
 		if updated != nil {
-			a.cache.Set(at, updated)
-			log.Printf("[API] updated cache for agent: %s", at)
+			a.cache.Set(updated.AgentType, updated)
+			log.Printf("[API] updated cache for agent: %s", updated.AgentType)
 		}
 	}
 
@@ -180,18 +190,15 @@ func (a *API) updateConfig(w http.ResponseWriter, r *http.Request) {
 func (a *API) deleteConfig(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	// Deactivate from all agents first
-	agents, _ := a.db.GetActiveAgentsForConfig(id)
-	for _, at := range agents {
-		if p, ok := a.processors[at]; ok {
-			tc, _ := a.db.GetTokenConfig(id)
-			if tc != nil {
-				p.OnDeactivate(tc)
-				log.Printf("[API] deactivated processor for agent: %s", at)
-			}
+	// If this config is active, deactivate first
+	tc, _ := a.db.GetTokenConfig(id)
+	if tc != nil && tc.IsActive {
+		if p, ok := a.processors[tc.AgentType]; ok {
+			p.OnDeactivate(tc)
+			log.Printf("[API] deactivated processor for agent: %s", tc.AgentType)
 		}
-		a.cache.Remove(at)
-		log.Printf("[API] removed cache for agent: %s", at)
+		a.cache.Remove(tc.AgentType)
+		log.Printf("[API] removed cache for agent: %s", tc.AgentType)
 	}
 
 	if err := a.db.DeleteTokenConfig(id); err != nil {
@@ -222,86 +229,65 @@ func (a *API) getUsage(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) activateConfig(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req model.ActivateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("[API] activate config: invalid request body: %v", err)
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
 
-	tc, err := a.db.GetTokenConfig(id)
+	activated, deactivated, err := a.db.ActivateTokenConfig(id)
 	if err != nil {
 		log.Printf("[API] activate config failed: id=%s, error=%v", id, err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if tc == nil {
+	if activated == nil {
 		log.Printf("[API] activate config: config not found: id=%s", id)
 		writeError(w, http.StatusNotFound, "config not found")
 		return
 	}
 
-	if _, ok := a.processors[req.AgentType]; !ok {
-		log.Printf("[API] activate config: unknown agent type: %s", req.AgentType)
-		writeError(w, http.StatusBadRequest, "unknown agent type: "+req.AgentType)
-		return
-	}
-
-	if err := a.db.ActivateConfig(id, req.AgentType); err != nil {
-		log.Printf("[API] activate config db failed: id=%s, agent=%s, error=%v", id, req.AgentType, err)
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	a.cache.Set(req.AgentType, tc)
-
-	if p, ok := a.processors[req.AgentType]; ok {
-		if err := p.OnActivate(tc); err != nil {
-			log.Printf("[API] processor OnActivate error: agent=%s, error=%v", req.AgentType, err)
-		} else {
-			log.Printf("[API] processor OnActivate success: agent=%s", req.AgentType)
+	// Handle previously active config for the same agent type
+	if deactivated != nil {
+		if p, ok := a.processors[deactivated.AgentType]; ok {
+			p.OnDeactivate(deactivated)
+			log.Printf("[API] deactivated previous config: agent=%s, config_id=%s", deactivated.AgentType, deactivated.ID)
 		}
 	}
 
-	log.Printf("[API] config activated: config_id=%s, config_name=%s, agent=%s", id, tc.Name, req.AgentType)
+	// Update cache and activate new config
+	a.cache.Set(activated.AgentType, activated)
+
+	if p, ok := a.processors[activated.AgentType]; ok {
+		if err := p.OnActivate(activated); err != nil {
+			log.Printf("[API] processor OnActivate error: agent=%s, error=%v", activated.AgentType, err)
+		} else {
+			log.Printf("[API] processor OnActivate success: agent=%s", activated.AgentType)
+		}
+	}
+
+	log.Printf("[API] config activated: config_id=%s, config_name=%s, agent=%s", id, activated.Name, activated.AgentType)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "activated"})
 }
 
 func (a *API) deactivateConfig(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req model.ActivateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("[API] deactivate config: invalid request body: %v", err)
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
 
-	tc, err := a.db.GetTokenConfig(id)
+	deactivated, err := a.db.DeactivateTokenConfig(id)
 	if err != nil {
 		log.Printf("[API] deactivate config failed: id=%s, error=%v", id, err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if tc == nil {
+	if deactivated == nil {
 		log.Printf("[API] deactivate config: config not found: id=%s", id)
 		writeError(w, http.StatusNotFound, "config not found")
 		return
 	}
 
-	if err := a.db.DeactivateConfig(req.AgentType); err != nil {
-		log.Printf("[API] deactivate config db failed: agent=%s, error=%v", req.AgentType, err)
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	a.cache.Remove(deactivated.AgentType)
+
+	if p, ok := a.processors[deactivated.AgentType]; ok {
+		p.OnDeactivate(deactivated)
+		log.Printf("[API] processor OnDeactivate: agent=%s", deactivated.AgentType)
 	}
 
-	a.cache.Remove(req.AgentType)
-
-	if p, ok := a.processors[req.AgentType]; ok {
-		p.OnDeactivate(tc)
-		log.Printf("[API] processor OnDeactivate: agent=%s", req.AgentType)
-	}
-
-	log.Printf("[API] config deactivated: config_id=%s, config_name=%s, agent=%s", id, tc.Name, req.AgentType)
+	log.Printf("[API] config deactivated: config_id=%s, config_name=%s, agent=%s", id, deactivated.Name, deactivated.AgentType)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deactivated"})
 }
 
@@ -374,13 +360,10 @@ func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
 			Type:  p.GetType(),
 			Label: p.GetLabel(),
 		}
-		vc, _ := a.db.GetActiveConfig(p.GetType())
-		if vc != nil {
-			tc, _ := a.db.GetTokenConfig(vc.TokenID)
-			if tc != nil {
-				info.ActiveConfigID = &tc.ID
-				info.ActiveConfigName = &tc.Name
-			}
+		tc, _ := a.db.GetActiveTokenConfigByAgentType(p.GetType())
+		if tc != nil {
+			info.ActiveConfigID = &tc.ID
+			info.ActiveConfigName = &tc.Name
 		}
 		agents = append(agents, info)
 	}

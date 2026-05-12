@@ -94,8 +94,8 @@ The proxy never buffers SSE responses. Usage is extracted from `message_start` a
 - Updated synchronously on every activate/deactivate API call
 - Never goes to DB per-request
 
-When a config is activated for an agent type, the flow is:
-1. DB: delete old `valid_config` row for that `agent_type`, insert new one
+When a config is activated, the flow is:
+1. DB: set `is_active=0` on old active config for the same `agent_type`, set `is_active=1` on new one
 2. Cache: `cache.Set(agentType, tokenConfig)`
 3. `AgentProcessor.OnActivate(config)` called — for `claude_code` this writes `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY = "placeholder"` into `~/.claude/settings.json`
 
@@ -125,12 +125,13 @@ On first start (empty DB), `importExistingConfig()` in `main.go` reads `~/.claud
 
 ## Database
 
-SQLite at `~/.token_gate/token_gate.db`. Three tables:
-- `token_config` — stored API keys and model per named config
-- `valid_config` — one row per `agent_type` (UNIQUE constraint), maps agent → active token
+SQLite at `~/.token_gate/token_gate.db`. Two tables (as of release_2.0):
+- `token_config` — stored API keys and model per named config; includes `agent_type TEXT` and `is_active INTEGER` columns (replaces old `valid_config` table)
 - `usage` — append-only request log with token counts
 
 `api_key` is stored in plaintext (local tool, acceptable risk). All API responses mask it to `first4***last4`.
+
+**Schema migration**: On startup `InitSchema` runs `ALTER TABLE token_config ADD COLUMN agent_type` / `is_active` (idempotent), then calls `migrateFromValidConfig()` which reads any legacy `valid_config` rows, writes `agent_type`+`is_active` into `token_config`, and drops the old table. Safe to run on both old and fresh databases.
 
 ## Frontend Architecture
 
@@ -142,7 +143,11 @@ Edit switching from `ConfigDetail` → `ConfigForm` uses `window.__openEdit(id)`
 
 `ConfigDetail.vue` uses raw `echarts.init(domRef)` — the chart instance is created in `renderChart()`, re-initialized on tab change, and disposed in `onUnmounted`.
 
-The `GET /api/configs/:id` endpoint returns a bare `TokenConfig` (no `active_agents`). Active agent state in the detail view is derived from the `agents` prop passed down from `App.vue`, not from the config object.
+**Agent type tabs**: `App.vue` renders pill tabs in the header for each registered agent type (`selectedAgentType` ref). Switching tabs calls `getConfigs(agentType)`, filtering the list server-side. The selected agent type is passed down to `ConfigList`, `ConfigForm`, and `ConfigDetail` as a prop.
+
+**Config create flow**: `ConfigForm` shows an `agent_type` selector (required) on create, pre-filled from `selectedAgentType`. On edit the field is read-only (agent type cannot change). `updateConfig` strips `agent_type` from the payload since the backend ignores it on update.
+
+**Activate/deactivate**: Since `agent_type` is stored on the config, the API endpoints `POST /api/configs/:id/activate` and `POST /api/configs/:id/deactivate` no longer require a request body — the backend reads `agent_type` from the config record directly.
 
 ## Company/Vendor List (`internal/company`)
 
@@ -171,7 +176,9 @@ Edit `server/internal/company/company.json` and commit to master. Existing runni
 
 ## Key Gotchas
 
-- **`GET /api/configs` vs `GET /api/configs/:id`**: The list endpoint returns `ConfigWithAgents` (includes `active_agents`); the single-item endpoint returns only `TokenConfig`. Don't expect `active_agents` on a single-config fetch.
+- **`agent_type` is immutable after creation**: The backend validates `agent_type` on create (must be a registered processor type) but ignores it on update. The frontend enforces this with a disabled field in edit mode.
+- **One active config per agent type**: `ActivateTokenConfig` atomically deactivates any existing active config for the same `agent_type` before activating the new one — both in DB (transaction) and via `OnDeactivate`/`OnActivate` processor hooks.
+- **`GET /api/configs` vs `GET /api/configs/:id`**: Both return plain `TokenConfig` (with `agent_type` and `is_active`). The list endpoint accepts `?agent_type=` to filter. `ConfigWithAgents` and `active_agents` no longer exist.
 - **`@updated` propagation**: When `ConfigDetail` emits `updated`, `App.vue` must reload both configs and agents to keep the agent switch state consistent.
 - **Web embed requires a build first**: `server/internal/web/dist/` must exist before `go build`. Running `go build` without it will fail due to the `//go:embed dist/*` directive.
 - **CORS**: The API server (port 12122) returns `Access-Control-Allow-Origin: *` headers. Port 12123 (web) and port 12122 (API) are different origins so this is required even in production.

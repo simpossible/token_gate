@@ -8,6 +8,20 @@
 
     <el-card class="form-card">
       <el-form :model="form" label-width="100px" :rules="rules" ref="formRef">
+        <el-form-item label="Agent Type" prop="agent_type" v-if="!editMode">
+          <el-select v-model="form.agent_type" style="width: 100%">
+            <el-option
+              v-for="agent in agents"
+              :key="agent.type"
+              :value="agent.type"
+              :label="agent.label"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Agent Type" v-if="editMode">
+          <el-input :model-value="agentLabel" disabled />
+        </el-form-item>
+
         <el-form-item label="Name" prop="name">
           <el-input v-model="form.name" placeholder="Config display name" />
         </el-form-item>
@@ -70,7 +84,9 @@ import { createConfig, updateConfig, getConfig } from '../api/index.js'
 const props = defineProps({
   configId: String,
   editMode: Boolean,
-  companies: { type: Array, default: () => [] }
+  companies: { type: Array, default: () => [] },
+  agents: { type: Array, default: () => [] },
+  selectedAgentType: { type: String, default: '' }
 })
 const emit = defineEmits(['back', 'saved'])
 
@@ -80,9 +96,11 @@ const form = ref({
   name: '',
   url: 'https://api.anthropic.com',
   api_key: '',
-  model: 'claude-sonnet-4-6'
+  model: 'claude-sonnet-4-6',
+  agent_type: ''
 })
 const rules = {
+  agent_type: [{ required: true, message: 'Agent type is required', trigger: 'change' }],
   name: [{ required: true, message: 'Name is required', trigger: 'blur' }],
   url: [{ required: true, message: 'URL is required', trigger: 'blur' }],
   api_key: [{ required: true, message: 'API Key is required', trigger: 'blur' }],
@@ -92,6 +110,11 @@ const rules = {
 const currentModels = computed(() => {
   const found = props.companies.find(c => c.url === form.value.url)
   return found ? found.models : []
+})
+
+const agentLabel = computed(() => {
+  const found = props.agents.find(a => a.type === form.value.agent_type)
+  return found ? found.label : form.value.agent_type
 })
 
 function onUrlChange(val) {
@@ -108,7 +131,8 @@ async function loadConfig() {
       name: cfg.name,
       url: cfg.url,
       api_key: '',
-      model: cfg.model
+      model: cfg.model,
+      agent_type: cfg.agent_type || ''
     }
   }
 }
@@ -120,7 +144,8 @@ async function submit() {
   submitting.value = true
   try {
     if (props.configId) {
-      await updateConfig(props.configId, form.value)
+      const { agent_type, ...updateData } = form.value
+      await updateConfig(props.configId, updateData)
       ElMessage.success('Config updated')
     } else {
       await createConfig(form.value)
@@ -128,14 +153,23 @@ async function submit() {
     }
     emit('saved')
   } catch (e) {
-    ElMessage.error(e.message || 'Failed to save config')
+    ElMessage.error(e?.response?.data?.error || e.message || 'Failed to save config')
   } finally {
     submitting.value = false
   }
 }
 
 onMounted(async () => {
-  await loadConfig()
+  if (props.configId) {
+    await loadConfig()
+  } else {
+    // Pre-select agent type from the header tab
+    if (props.selectedAgentType) {
+      form.value.agent_type = props.selectedAgentType
+    } else if (props.agents.length > 0) {
+      form.value.agent_type = props.agents[0].type
+    }
+  }
 })
 </script>
 

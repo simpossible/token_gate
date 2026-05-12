@@ -8,16 +8,8 @@
     >
       <div class="card-header">
         <h3 class="card-name">{{ config.name }}</h3>
-        <div class="card-tags">
-          <el-tag
-            v-for="agent in config.active_agents"
-            :key="agent"
-            :type="agentTagType(agent)"
-            size="small"
-          >
-            {{ agentLabel(agent) }}
-          </el-tag>
-        </div>
+        <el-tag v-if="config.is_active" type="success" size="small">Active</el-tag>
+        <el-tag v-else type="info" size="small">Inactive</el-tag>
       </div>
       <div class="card-info">
         <div class="info-row">
@@ -43,29 +35,19 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { getLatestLatency } from '../api/index.js'
 
 const props = defineProps({
   configs: { type: Array, default: () => [] },
-  agents: { type: Array, default: () => [] }
+  agents: { type: Array, default: () => [] },
+  selectedAgentType: { type: String, default: '' }
 })
 
 defineEmits(['open-detail', 'open-create'])
 
 const latencyMap = ref({})
-
-const agentColors = { claude_code: 'success', cursor: '' }
-
-function agentTagType(agent) {
-  return agentColors[agent] || ''
-}
-
-function agentLabel(agent) {
-  const found = props.agents.find(a => a.type === agent)
-  return found ? found.label : agent
-}
 
 function latencyText(id) {
   const entry = latencyMap.value[id]
@@ -73,7 +55,8 @@ function latencyText(id) {
   return entry.latest_latency_ms + 'ms'
 }
 
-onMounted(async () => {
+async function loadLatencies() {
+  if (!props.configs.length) return
   const results = await Promise.allSettled(
     props.configs.map(c => getLatestLatency(c.id).then(data => ({ id: c.id, data })))
   )
@@ -84,7 +67,11 @@ onMounted(async () => {
     }
   }
   latencyMap.value = map
-})
+}
+
+onMounted(loadLatencies)
+
+watch(() => props.configs, loadLatencies)
 </script>
 
 <style scoped>
@@ -119,9 +106,8 @@ onMounted(async () => {
   background: transparent;
 }
 .add-text { margin-top: 8px; color: #909399; font-size: 14px; }
-.card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .card-name { font-size: 16px; font-weight: 600; color: #303133; margin: 0; }
-.card-tags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .info-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 13px; }
 .info-label { color: #909399; min-width: 48px; }
 .info-value { color: #606266; word-break: break-all; }

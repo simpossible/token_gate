@@ -11,6 +11,7 @@
         <el-descriptions :column="1" border>
           <el-descriptions-item label="ID">{{ config.id }}</el-descriptions-item>
           <el-descriptions-item label="Name">{{ config.name }}</el-descriptions-item>
+          <el-descriptions-item label="Agent Type">{{ agentLabel(config.agent_type) }}</el-descriptions-item>
           <el-descriptions-item label="URL">{{ config.url }}</el-descriptions-item>
           <el-descriptions-item label="API Key">{{ config.api_key }}</el-descriptions-item>
           <el-descriptions-item label="Model">{{ config.model }}</el-descriptions-item>
@@ -22,20 +23,18 @@
         </div>
       </el-card>
 
-      <el-card class="card" header="Active Agents">
-        <div class="agent-list">
-          <div v-for="agent in agents" :key="agent.type" class="agent-item">
-            <div class="agent-info">
-              <el-icon><Monitor /></el-icon>
-              <span class="agent-name">{{ agent.label }}</span>
-              <el-tag v-if="isActiveForAgent(agent)" type="success" size="small">Active</el-tag>
-              <el-tag v-else type="info" size="small">Inactive</el-tag>
-            </div>
-            <el-switch
-              :model-value="isActiveForAgent(agent)"
-              @change="(val) => toggleAgent(agent, val)"
-            />
+      <el-card class="card" header="Status">
+        <div class="status-item">
+          <div class="status-info">
+            <el-icon><Monitor /></el-icon>
+            <span class="status-name">{{ agentLabel(config.agent_type) }}</span>
+            <el-tag v-if="config.is_active" type="success" size="small">Active</el-tag>
+            <el-tag v-else type="info" size="small">Inactive</el-tag>
           </div>
+          <el-switch
+            :model-value="config.is_active"
+            @change="(val) => toggleActive(val)"
+          />
         </div>
       </el-card>
 
@@ -107,10 +106,6 @@ let chartInstance = null
 let refreshTimer = null
 let lastRefreshTime = null
 
-function isActiveForAgent(agent) {
-  return agent.active_config_id === props.configId
-}
-
 const usageTabs = computed(() => {
   if (!usageData.value?.by_agent) return []
   return Object.keys(usageData.value.by_agent)
@@ -130,7 +125,6 @@ async function loadUsage() {
   try {
     usageData.value = await getUsage(props.configId)
 
-    // Use the latest_created_at from the API response for delta queries
     lastRefreshTime = usageData.value.latest_created_at_ts || Date.now()
 
     const tabs = Object.keys(usageData.value?.by_agent || {})
@@ -148,26 +142,19 @@ async function loadUsageDelta() {
   if (!lastRefreshTime) return
 
   try {
-    console.log('[ConfigDetail] Loading usage delta, lastRefreshTime:', lastRefreshTime)
     const deltaUsages = await getUsageDelta(props.configId, lastRefreshTime)
-    console.log('[ConfigDetail] Delta usages received:', deltaUsages?.length || 0)
     if (!deltaUsages || deltaUsages.length === 0) {
       return
     }
 
-    // Update last refresh time to now
     lastRefreshTime = Date.now()
-    console.log('[ConfigDetail] Updated lastRefreshTime to:', lastRefreshTime)
 
-    // Merge delta usages into usageData
     if (usageData.value) {
-      // Update totals
       deltaUsages.forEach(u => {
         usageData.value.total_input_tokens = (usageData.value.total_input_tokens || 0) + u.input_tokens
         usageData.value.total_output_tokens = (usageData.value.total_output_tokens || 0) + u.output_tokens
         usageData.value.records_count = (usageData.value.records_count || 0) + 1
 
-        // Update by_agent data
         if (!usageData.value.by_agent[u.agent_type]) {
           usageData.value.by_agent[u.agent_type] = { input_tokens: 0, output_tokens: 0, requests: 0 }
         }
@@ -175,7 +162,6 @@ async function loadUsageDelta() {
         usageData.value.by_agent[u.agent_type].output_tokens += u.output_tokens
         usageData.value.by_agent[u.agent_type].requests += 1
 
-        // Update daily_usage data
         const date = new Date(u.created_at_ts).toISOString().split('T')[0]
         const existingDaily = usageData.value.daily_usage.find(d => d.date === date && d.agent_type === u.agent_type)
         if (existingDaily) {
@@ -193,11 +179,9 @@ async function loadUsageDelta() {
         }
       })
 
-      // Re-render chart without animation
       await nextTick()
       renderChart(false)
 
-      // Push new items to RequestChart
       requestChartRef.value?.addUsages(deltaUsages)
     }
   } catch (e) {
@@ -240,16 +224,17 @@ function agentLabel(type) {
   return found ? found.label : type
 }
 
-async function toggleAgent(agent, active) {
+async function toggleActive(active) {
   try {
     if (active) {
-      await activateConfig(props.configId, agent.type)
+      await activateConfig(props.configId)
     } else {
-      await deactivateConfig(props.configId, agent.type)
+      await deactivateConfig(props.configId)
     }
+    await loadConfig()
     emit('updated')
   } catch (e) {
-    ElMessageBox.alert(e?.response?.data?.error || e.message || 'Failed to toggle agent', 'Error')
+    ElMessageBox.alert(e?.response?.data?.error || e.message || 'Failed to toggle status', 'Error')
   }
 }
 
@@ -303,10 +288,9 @@ onUnmounted(() => {
 .header-title { font-size: 18px; font-weight: 500; }
 .card { margin-bottom: 16px; }
 .card-actions { margin-top: 16px; display: flex; gap: 12px; }
-.agent-list { display: flex; flex-direction: column; gap: 12px; }
-.agent-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
-.agent-info { display: flex; align-items: center; gap: 8px; }
-.agent-name { font-weight: 500; }
+.status-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+.status-info { display: flex; align-items: center; gap: 8px; }
+.status-name { font-weight: 500; }
 .usage-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
 .summary-item { text-align: center; padding: 12px; background: #f5f7fa; border-radius: 8px; }
 .summary-label { font-size: 12px; color: #909399; margin-bottom: 4px; }
