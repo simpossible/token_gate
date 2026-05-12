@@ -239,6 +239,7 @@
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
+				AA11BB22CC33DD44EE55FF66 /* Copy token_gate binary to Resources */,
 				66C019B708B8504B23770767 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
@@ -421,6 +422,28 @@
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase copy token_gate binary */
+			AA11BB22CC33DD44EE55FF66 /* Copy token_gate binary to Resources */ = {
+				isa = PBXShellScriptBuildPhase;
+				alwaysOutOfDate = 1;
+				buildActionMask = 2147483647;
+				files = (
+				);
+				inputFileListPaths = (
+				);
+				inputPaths = (
+				);
+				name = "Copy token_gate binary to Resources";
+				outputFileListPaths = (
+				);
+				outputPaths = (
+				);
+				runOnlyForDeploymentPostprocessing = 0;
+				shellPath = /bin/sh;
+				shellScript = "cp \"${PROJECT_DIR}/../assets/bin/token_gate\" \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/token_gate\"\nchmod +x \"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents/Resources/token_gate\"\n";
+			};
+/* End PBXShellScriptBuildPhase copy token_gate binary */
 
 /* Begin PBXSourcesBuildPhase section */
 		331C80D1294CF70F00263BE5 /* Sources */ = {

@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/services.dart';
-
 import 'api_service.dart';
 
 class BackendService {
@@ -16,29 +14,20 @@ class BackendService {
   }
 
   Future<void> _startDaemon() async {
-    final binPath = await _extractBinary();
-    // Go daemon daemonizes itself, no need to track the process
+    final binPath = _bundleBinaryPath();
+    if (!File(binPath).existsSync()) {
+      throw Exception('token_gate binary not found in bundle: $binPath');
+    }
     await Process.start(binPath, [], mode: ProcessStartMode.detached);
   }
 
-  Future<String> _extractBinary() async {
-    final home = Platform.environment['HOME'] ??
-        Platform.environment['USERPROFILE'] ??
-        '';
-    final dir = Directory('$home/.token_gate');
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-
-    final dest = '$home/.token_gate/token_gate';
-    final destFile = File(dest);
-
-    final data = await rootBundle.load('assets/bin/token_gate');
-    await destFile.writeAsBytes(data.buffer.asUint8List(), flush: true);
-
-    // chmod +x on Unix
-    if (!Platform.isWindows) {
-      await Process.run('chmod', ['+x', dest]);
-    }
-    return dest;
+  /// Resolve the Go binary path from the app bundle:
+  /// <app.app>/Contents/Resources/token_gate
+  String _bundleBinaryPath() {
+    final exePath = Platform.resolvedExecutable;
+    // exePath = <app.app>/Contents/MacOS/<executable>
+    final contentsDir = exePath.substring(0, exePath.lastIndexOf('/MacOS/'));
+    return '$contentsDir/Resources/token_gate';
   }
 
   Future<void> _waitReady({int maxAttempts = 25}) async {
