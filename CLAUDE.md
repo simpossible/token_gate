@@ -12,6 +12,8 @@ Token Gate is a local proxy gateway that manages multiple Claude API keys for AI
 
 ## Release Process
 
+### macOS
+
 Releasing a new version is a single command (no `gh` CLI — only SSH keys + GitHub PAT):
 
 ```bash
@@ -41,6 +43,31 @@ The script does everything in order:
   brew install --cask token-gate
   ```
 
+### Windows
+
+Windows releases use Inno Setup to create an installer with custom installation path support.
+
+```batch
+REM Prerequisites:
+REM 1. GitHub PAT (set once):
+REM    set TOKEN_GATE_GITHUB_TOKEN=ghp_xxxx
+REM 2. Inno Setup Compiler:
+REM    winget install JRSoftware.InnoSetup
+
+REM Release (run from project root)
+.\scripts\release.bat v0.2.1
+```
+
+The script does everything in order:
+1. Calls `build_installer.bat` to build the installer locally (Go binary → Flutter → Inno Setup)
+2. Tags the commit and pushes tag + master to GitHub via SSH
+3. Creates a GitHub Release via API and uploads the installer
+
+**Common pitfalls:**
+- Inno Setup must be installed and `iscc` in PATH
+- The installer must be built on Windows (Inno Setup is Windows-only)
+- Users download `TokenGate-{version}-setup.exe` and run it to install
+
 ### macOS 签名踩坑（build_dmg.sh 的设计原因）
 
 **为什么不用 Xcode 正常签名：** Flutter 的 `xcode_backend.dart` 会用 Runner target 的签名身份去签所有 framework，强制连 Apple timestamp 服务。代理环境下 timestamp 服务不稳定，导致构建随机失败。
@@ -54,6 +81,21 @@ The script does everything in order:
 3. **不能只用 `--deep`**：它不会给 `Contents/Resources/` 里的独立二进制加 hardened runtime，公证会拒绝
 
 **entitlements 必须显式设 `get-task-allow = false`**（`Release.entitlements`），否则公证报错——Xcode 在 Debug 构建时会自动加这个 key，Release 构建残留就会被 Apple 拒绝。
+
+### Windows 安装器设计（installer.iss）
+
+**为什么用 Inno Setup：** 免费、开源、功能完善，支持自定义安装路径、创建桌面快捷方式、完整卸载程序。
+
+**实际方案：**
+1. 使用 `[Setup]` 段配置基本信息（AppId、版本、默认安装目录）
+2. 默认安装路径：`{autopf}\TokenGate`（`{autopf}` 自动映射到 Program Files，x64 下为 Program Files (x86)）
+3. 支持 3 种语言：英语、简体中文、日语（`[Languages]` 段）
+4. 可选创建桌面快捷方式和快速启动图标（`[Tasks]` 段，默认不勾选）
+5. 卸载时删除用户数据目录（`{localappdata}\TokenGate` 和 `{userappdata}\.token_gate`）
+
+**安装前处理（`[Code]` 段）：**
+- `PrepareToInstall()` 会调用 `taskkill /F /IM TokenGate.exe` 关闭正在运行的实例
+- 避免安装时文件被占用导致失败
 
 ## Build Commands
 
@@ -69,11 +111,16 @@ cd server && make app            # → app/build/macos/Build/Products/Release/To
 
 # Flutter desktop app — Windows (must run on a Windows machine)
 cd server && make windows-app   # → app/build/windows/x64/runner/Release/
+
+# Windows installer (requires Inno Setup)
+cd server && make windows-installer VERSION=2.0.0  # → build/TokenGate-2.0.0-setup.exe
 ```
 
 `make app` does: `make build` → copy `token_gate` binary to `app/assets/bin/` → `flutter build macos`.
 
 `make windows-app` does: cross-compile `GOOS=windows` → copy `token_gate.exe` to `app/assets/bin/` → `flutter build windows`. The Go cross-compile step can run on macOS, but `flutter build windows` must run on Windows.
+
+`make windows-installer` does: `make windows-app` → compile installer with Inno Setup (`iscc`). Inno Setup must be installed (Windows-only).
 
 ## Two-Port Architecture
 

@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-const _baseUrl = 'https://tokengate.mikevillage.com';
+const _baseUrl = 'https://api.tokengate.mikevillage.com';
 
 class UpdateService {
   Future<String?> checkNewVersion(String deviceId, String platform) async {
