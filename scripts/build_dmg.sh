@@ -100,7 +100,7 @@ build_flutter_app() {
 
 # --- Step 3: Sign with Developer ID (inside-out: Go binaries → frameworks → main bundle) ---
 sign_app() {
-    local app_path="$APP_DIR/build/macos/Build/Products/Release/app.app"
+    local app_path="$APP_DIR/build/macos/Build/Products/Release/TokenGate.app"
     info "Signing .app bundle with Developer ID + hardened runtime..."
 
     # 1) Sign embedded Go binaries (not covered by --deep)
@@ -126,7 +126,7 @@ sign_app() {
 
 # --- Step 4: Verify code signature ---
 verify_signature() {
-    local app_path="$APP_DIR/build/macos/Build/Products/Release/app.app"
+    local app_path="$APP_DIR/build/macos/Build/Products/Release/TokenGate.app"
     info "Verifying code signature..."
     codesign --verify --deep --strict "$app_path" 2>&1 || {
         error "Code signature verification failed!"
@@ -138,7 +138,7 @@ verify_signature() {
 # --- Step 5: Create DMG using hdiutil ---
 create_dmg() {
     local version="$1"
-    local app_path="$APP_DIR/build/macos/Build/Products/Release/app.app"
+    local app_path="$APP_DIR/build/macos/Build/Products/Release/TokenGate.app"
     local dmg_name="TokenGate-${version}.dmg"
     local dmg_path="$BUILD_DIR/$dmg_name"
     local staging="$BUILD_DIR/dmg_staging"

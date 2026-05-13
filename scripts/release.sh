@@ -116,7 +116,7 @@ cask "token-gate" do
 
   depends_on macos: ">= :catalina"
 
-  app "app.app"
+  app "TokenGate.app"
 end
 EOF
 

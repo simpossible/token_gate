@@ -34,7 +34,7 @@ The script does everything in order:
 **Common pitfalls:**
 - **Never use `gh` CLI for releases** — the project uses `git tag` + `git push` + GitHub API (via `TOKEN_GATE_GITHUB_TOKEN`). No `gh auth` needed.
 - The DMG must be built locally (requires Developer ID Application certificate in Keychain). Cannot be built in CI because code signing certificates are not available there.
-- The app inside the DMG is `app.app` (Flutter default `PRODUCT_NAME`). The Cask references `app "app.app"`.
+- The app inside the DMG is `TokenGate.app` (set via `PRODUCT_NAME` in `AppInfo.xcconfig`). The Cask references `app "TokenGate.app"`.
 - After release, users install with:
   ```bash
   brew tap simpossible/tap
@@ -51,7 +51,7 @@ cd server && make build          # → ./token_gate
 ./server/token_gate
 
 # Flutter desktop app (compiles Go binary first, then Flutter)
-cd server && make app            # → app/build/macos/Build/Products/Release/app.app
+cd server && make app            # → app/build/macos/Build/Products/Release/TokenGate.app
 ```
 
 `make app` does: `make build` → copy `token_gate` binary to `app/assets/bin/` → `flutter build macos`.
@@ -375,6 +375,10 @@ Reloaded every 5 minutes. Edit and save to update versions across all running in
 | `updateServiceProvider` | `Provider<UpdateService>` | HTTP client for remote version API |
 | `deviceIdProvider` | `FutureProvider<String>` | UUID persisted in shared_preferences |
 | `newVersionProvider` | `StateProvider<String?>` | null = no update, string = new version available |
+
+## Claude Code Rules
+
+- **环境变量同步**：执行需要环境变量的脚本（如 release.sh）之前，必须先 `source ~/.zshrc 2>/dev/null; source ~/.zprofile 2>/dev/null` 以加载用户 shell 配置中的环境变量。不要假设 Claude Code 的 Bash 工具会自动继承用户在终端中设置的变量。
 
 ## attendion
 每次重要的功能设计变更要更新到项目知识文档中
