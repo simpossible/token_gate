@@ -12,35 +12,33 @@ Token Gate is a local proxy gateway that manages multiple Claude API keys for AI
 
 ## Release Process
 
-Releasing a new version is a single command (no `gh` CLI auth needed — only SSH keys):
+Releasing a new version is a single command (no `gh` CLI — only SSH keys + GitHub PAT):
 
 ```bash
+# Prerequisites (set once):
+export TOKEN_GATE_GITHUB_TOKEN="ghp_xxxx"      # GitHub PAT (repo scope)
+export TOKEN_GATE_APPLE_ID="..."                # Apple ID for notarization
+export TOKEN_GATE_APPLE_PASSWORD="xxxx-xxxx"    # App-specific password
+export TOKEN_GATE_APPLE_TEAM_ID="5X939PFV35"
+
 # Release (run from project root)
-./scripts/release.sh v0.1.3
+./scripts/release.sh v0.2.1
 ```
 
 The script does everything in order:
-1. Tags the commit and pushes tag + master to GitHub
-2. GitHub Actions (`.github/workflows/release.yml`) triggers automatically: cross-compiles for all five targets, uploads archives + `checksums.txt` as release assets:
-   | Platform | Archive |
-   |----------|---------|
-   | `darwin/arm64` | `.tar.gz` |
-   | `darwin/amd64` | `.tar.gz` |
-   | `linux/amd64`  | `.tar.gz` |
-   | `linux/arm64`  | `.tar.gz` |
-   | `windows/amd64`| `.zip`   |
-3. Script polls until `checksums.txt` is available (~5-8 min)
-4. Fetches CI-built SHA256s from `checksums.txt`
-5. Clones `simpossible/homebrew-tap` via SSH, regenerates the formula with the new version and SHA256s, and pushes
+1. Calls `build_dmg.sh` to build the DMG locally (Go binary → Flutter → sign → notarize)
+2. Tags the commit and pushes tag + master to GitHub via SSH
+3. Creates a GitHub Release via API and uploads the DMG
+4. Clones `simpossible/homebrew-tap` via SSH, updates the Cask with new version + SHA256, and pushes
 
 **Common pitfalls:**
-- Never use `gh release create` locally — the GitHub Actions workflow handles the Release. Local builds produce different SHA256s than CI builds.
-- Run the script from the **project root** (where `server/` lives), not from inside `server/`.
-- The formula in `homebrew/token_gate.rb` is not the one Homebrew uses — it's a reference copy. The live formula is in the `homebrew-tap` repo (`git@github.com:simpossible/homebrew-tap.git`), updated automatically by the script.
+- **Never use `gh` CLI for releases** — the project uses `git tag` + `git push` + GitHub API (via `TOKEN_GATE_GITHUB_TOKEN`). No `gh auth` needed.
+- The DMG must be built locally (requires Developer ID Application certificate in Keychain). Cannot be built in CI because code signing certificates are not available there.
+- The app inside the DMG is `app.app` (Flutter default `PRODUCT_NAME`). The Cask references `app "app.app"`.
 - After release, users install with:
   ```bash
   brew tap simpossible/tap
-  brew install token_gate
+  brew install --cask token-gate
   ```
 
 ## Build Commands

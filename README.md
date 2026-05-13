@@ -18,22 +18,18 @@
 
 ## 安装
 
-### macOS
+### macOS（Homebrew）
+
+```bash
+brew tap simpossible/tap
+brew install --cask token-gate
+```
+
+### macOS（手动下载）
 
 从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载 DMG，双击打开，将 TokenGate 拖入 Applications 文件夹。
 
 首次打开时，macOS 可能会提示"无法验证开发者"。右键点击应用 → 选择"打开" → 点击"打开"确认即可。
-
-### CLI 模式（macOS / Linux / Windows）
-
-如果你更习惯命令行，也可以通过 Homebrew 安装 Go 二进制版本：
-
-```bash
-brew tap simpossible/tap
-brew install token_gate
-```
-
-Linux 和 Windows 用户从 [Releases](https://github.com/simpossible/token_gate/releases/latest) 下载对应平台的预编译二进制。
 
 ## 使用
 
