@@ -41,6 +41,20 @@ The script does everything in order:
   brew install --cask token-gate
   ```
 
+### macOS 签名踩坑（build_dmg.sh 的设计原因）
+
+**为什么不用 Xcode 正常签名：** Flutter 的 `xcode_backend.dart` 会用 Runner target 的签名身份去签所有 framework，强制连 Apple timestamp 服务。代理环境下 timestamp 服务不稳定，导致构建随机失败。
+
+**实际方案：**
+1. Flutter 构建时临时用 ad-hoc 签名（`CODE_SIGN_IDENTITY = "-"`），构建完恢复 `project.pbxproj`
+2. 构建后手动签名，**顺序必须 inside-out**：
+   - 先签 Go 二进制（`Contents/Resources/token_gate`）→ `--options runtime --timestamp`
+   - 再签 `App.framework`
+   - 最后 `--deep` 签主 bundle + entitlements
+3. **不能只用 `--deep`**：它不会给 `Contents/Resources/` 里的独立二进制加 hardened runtime，公证会拒绝
+
+**entitlements 必须显式设 `get-task-allow = false`**（`Release.entitlements`），否则公证报错——Xcode 在 Debug 构建时会自动加这个 key，Release 构建残留就会被 Apple 拒绝。
+
 ## Build Commands
 
 ```bash
@@ -50,11 +64,16 @@ cd server && make build          # → ./token_gate
 # Run the server (starts both ports)
 ./server/token_gate
 
-# Flutter desktop app (compiles Go binary first, then Flutter)
+# Flutter desktop app — macOS
 cd server && make app            # → app/build/macos/Build/Products/Release/TokenGate.app
+
+# Flutter desktop app — Windows (must run on a Windows machine)
+cd server && make windows-app   # → app/build/windows/x64/runner/Release/
 ```
 
 `make app` does: `make build` → copy `token_gate` binary to `app/assets/bin/` → `flutter build macos`.
+
+`make windows-app` does: cross-compile `GOOS=windows` → copy `token_gate.exe` to `app/assets/bin/` → `flutter build windows`. The Go cross-compile step can run on macOS, but `flutter build windows` must run on Windows.
 
 ## Two-Port Architecture
 
@@ -277,6 +296,16 @@ main() → windowManager.ensureInitialized() → 固定窗口参数
 
 - **Entitlements（非 App Store 分发）**：`com.apple.security.network.client`（调 127.0.0.1）+ `temporary-exception.files.home-relative-path.read-write` 允许读写 `~/.token_gate/`
 - **不上 App Store 原因**：沙盒会阻断写 `~/.claude/settings.json` 和绑定固定端口（12121/12122）
+
+### Windows 特殊配置
+
+Flutter 层的三处 Windows 适配（不能照搬 macOS 写法）：
+
+1. **Go 二进制路径** (`backend_service.dart` `_bundleBinaryPath()`)：macOS 用 app bundle 路径 `Contents/Resources/token_gate`；Windows 用 **EXE 同级目录** `<dir>\token_gate.exe`（CMake install 规则负责将其复制过去）
+
+2. **托盘标题** (`tray_service.dart`)：macOS 用 `trayManager.setTitle(text)` 在菜单栏图标旁显示文字；Windows 不支持 `setTitle`，必须用 `trayManager.setToolTip(text)`，否则静默失败
+
+3. **关窗隐藏到托盘** (`home_view.dart`)：macOS 由 `AppDelegate.swift` 在原生层拦截；Windows 必须在 `initState()` 调用 `windowManager.setPreventClose(true)`，否则关窗事件到不了 Dart 层的 `onWindowClose`，进程直接退出
 
 ## Company/Vendor List (`internal/company`)
 
