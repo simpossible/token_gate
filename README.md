@@ -14,7 +14,7 @@
 
 <img width="800" alt="主界面" src="docs/home.jpg" />
 
-实时日志
+### 实时日志
 <img width="800" alt="实时日志" src="docs/log.jpg" />
 
 ## 安装
