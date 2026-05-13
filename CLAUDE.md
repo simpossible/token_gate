@@ -396,6 +396,11 @@ Reloaded every 5 minutes. Edit and save to update versions across all running in
 - **Update check**: `checkForUpdate()` in `update_provider.dart` calls remote service, compares with `package_info_plus` version
 - **Timing**: Checked once on startup, then every hour via `Timer.periodic` in `HomeView`
 - **UI**: Purple "有新版本" badge in top bar (between spacer and agent dropdown), controlled by `newVersionProvider`
+- **Windows UI**: 28pt title bar with close button (purple theme, top-right corner) + tray icon support
+  - Title bar: `Padding(top: 0)` for Windows, `Padding(top: 28)` for macOS (reserved for OS traffic lights)
+  - Close button: Top-right 14×14 × icon (`Icons.close`, `#9CA3AF` gray), calls `windowManager.hide()`
+  - Tray icon: Uses `.ico` format on Windows (16/32/48/256 sizes), PNG on macOS
+  - Tray right-click: `onTrayIconRightMouseDown()` → `trayManager.popUpContextMenu()` to show menu (Windows fix)
 
 ### Provider Setup (`update_provider.dart`)
 
