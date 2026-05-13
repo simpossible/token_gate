@@ -1,4 +1,4 @@
-.PHONY: build release-binaries clean app
+.PHONY: build release-binaries clean app windows-app
 
 build:
 	go build -o token_gate .
@@ -12,6 +12,16 @@ app:
 	cd ../app && flutter build macos
 	@echo ""
 	@echo "Built: app/build/macos/Build/Products/Release/app.app"
+
+# Cross-compile the Go binary for Windows and build the Flutter Windows app.
+# Run this from a Windows machine (or WSL with a Windows Flutter toolchain).
+windows-app:
+	GOOS=windows GOARCH=amd64 go build -o token_gate_windows_amd64.exe .
+	@mkdir -p ../app/assets/bin
+	@cp token_gate_windows_amd64.exe ../app/assets/bin/token_gate.exe
+	cd ../app && flutter build windows
+	@echo ""
+	@echo "Built: app/build/windows/x64/runner/Release/"
 
 # Cross-compile all platforms and package into tarballs/zips.
 # Called by scripts/release.sh — do not run manually.

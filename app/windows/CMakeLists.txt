@@ -4,7 +4,7 @@ project(app LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "app")
+set(BINARY_NAME "TokenGate")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -106,3 +106,10 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Bundle the Go daemon binary alongside the Flutter executable.
+set(TOKEN_GATE_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../assets/bin/token_gate.exe")
+if(EXISTS "${TOKEN_GATE_BIN}")
+  install(FILES "${TOKEN_GATE_BIN}" DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    COMPONENT Runtime)
+endif()

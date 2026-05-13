@@ -30,13 +30,22 @@ class BackendService {
     await Process.start(binPath, [], mode: ProcessStartMode.detached);
   }
 
-  /// Resolve the Go binary path from the app bundle:
-  /// <app.app>/Contents/Resources/token_gate
+  /// Resolve the Go binary path from the app bundle.
+  /// macOS: <app.app>/Contents/Resources/token_gate
+  /// Windows: <dir of exe>\token_gate.exe
+  /// Linux: <dir of exe>/token_gate
   String _bundleBinaryPath() {
     final exePath = Platform.resolvedExecutable;
-    // exePath = <app.app>/Contents/MacOS/<executable>
-    final contentsDir = exePath.substring(0, exePath.lastIndexOf('/MacOS/'));
-    return '$contentsDir/Resources/token_gate';
+    if (Platform.isMacOS) {
+      final contentsDir = exePath.substring(0, exePath.lastIndexOf('/MacOS/'));
+      return '$contentsDir/Resources/token_gate';
+    } else if (Platform.isWindows) {
+      final exeDir = exePath.substring(0, exePath.lastIndexOf(r'\'));
+      return '$exeDir\\token_gate.exe';
+    } else {
+      final exeDir = exePath.substring(0, exePath.lastIndexOf('/'));
+      return '$exeDir/token_gate';
+    }
   }
 
   Future<void> _waitReady({int maxAttempts = 25}) async {

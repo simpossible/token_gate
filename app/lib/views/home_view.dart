@@ -35,6 +35,11 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    // On Windows, setPreventClose(true) is required so the OS close event
+    // reaches onWindowClose instead of killing the process directly.
+    if (Platform.isWindows) {
+      windowManager.setPreventClose(true);
+    }
     _initTray();
     _startUpdateCheck();
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
@@ -49,9 +50,18 @@ class TrayService with TrayListener {
 
   Future<void> _updateTitle() async {
     if (_deltaInput > 0 || _deltaOutput > 0) {
-      await trayManager.setTitle('↑${_fmt(_deltaInput)} ↓${_fmt(_deltaOutput)}');
+      final text = '↑${_fmt(_deltaInput)} ↓${_fmt(_deltaOutput)}';
+      if (Platform.isMacOS) {
+        await trayManager.setTitle(text);
+      } else {
+        await trayManager.setToolTip(text);
+      }
     } else {
-      await trayManager.setTitle('');
+      if (Platform.isMacOS) {
+        await trayManager.setTitle('');
+      } else {
+        await trayManager.setToolTip('TokenGate');
+      }
     }
   }
 
