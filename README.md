@@ -1,130 +1,60 @@
 # Token Gate
 
-**[English](README_EN.md)**
+本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 Key 管理、实时切换和 Token 用量可视化。
 
-本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供：
+## 功能
 
 - **多 API Key 管理** — 存储来自 Anthropic、智谱、DeepSeek、Kimi 等供应商的密钥
-- **实时切换** — 会话中途切换供应商或模型，下一个请求即时生效，**无须新开会话**
-- **Token 用量可视化** — 查看每个配置的实际输入/输出 Token 数量和时延
+- **实时切换** — 会话中途切换供应商或模型，下一个请求即时生效，无须新开会话
+- **Token 用量可视化** — 查看每个配置的请求数、输入/输出 Token 数量和时延趋势
+- **实时日志** — 逐行查看代理转发的请求和响应内容
+- **状态栏显示** — macOS 菜单栏实时显示 Token 消耗
 
-<img width="1934" height="660" alt="配置列表" src="https://github.com/user-attachments/assets/3e4e1b01-6d95-44d2-bc1e-50c6de8a5544" />
+## 截图
+
+<img width="800" alt="主界面" src="docs/home.jpg" />
+
+<img width="800" alt="实时日志" src="docs/log.jpg" />
 
 ## 安装
 
-### macOS — Homebrew（推荐）
+### macOS
+
+从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载 DMG，双击打开，将 TokenGate 拖入 Applications 文件夹。
+
+首次打开时，macOS 可能会提示"无法验证开发者"。右键点击应用 → 选择"打开" → 点击"打开"确认即可。
+
+### CLI 模式（macOS / Linux / Windows）
+
+如果你更习惯命令行，也可以通过 Homebrew 安装 Go 二进制版本：
 
 ```bash
 brew tap simpossible/tap
 brew install token_gate
 ```
 
-### Linux — 直接下载
-
-从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载对应架构的预编译二进制：
-
-```bash
-# amd64（x86_64）
-curl -L https://github.com/simpossible/token_gate/releases/latest/download/token_gate_linux_amd64.tar.gz | tar xz
-sudo mv token_gate_linux_amd64 /usr/local/bin/token_gate
-```
-
-```bash
-# arm64
-curl -L https://github.com/simpossible/token_gate/releases/latest/download/token_gate_linux_arm64.tar.gz | tar xz
-sudo mv token_gate_linux_arm64 /usr/local/bin/token_gate
-```
-
-### Windows — 直接下载
-
-从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载 `token_gate_windows_amd64.zip`，解压后将 `token_gate_windows_amd64.exe` 重命名为 `token_gate.exe` 并放入 PATH 目录（例如 `C:\Program Files\token_gate\`）。
-
-Windows 下用任务计划程序实现开机自启：以管理员身份运行 PowerShell，执行：
-
-```powershell
-$action  = New-ScheduledTaskAction -Execute "C:\Program Files\token_gate\token_gate.exe" -Argument "server"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName "TokenGate" -Action $action -Trigger $trigger -RunLevel Highest
-```
-
-### 从源码构建
-
-需要 Go 1.21+ 和 Node.js 18+。
-
-```bash
-git clone https://github.com/simpossible/token_gate.git
-cd token_gate/server
-make build
-```
-
-构建产物为 `server/token_gate`，可移到任意 PATH 目录。
+Linux 和 Windows 用户从 [Releases](https://github.com/simpossible/token_gate/releases/latest) 下载对应平台的预编译二进制。
 
 ## 使用
 
-### 启动与停止
+启动后在状态栏找到 TokenGate 图标，点击打开主界面：
 
-```bash
-token_gate start    # 后台启动并打开浏览器
-token_gate stop     # 停止后台进程
-token_gate show     # 打开 Web 界面（如未运行则自动启动）
-token_gate status   # 查看运行状态
-```
+1. 点击右上角 **+** 按钮，添加 API 配置（选择厂商、填写 API Key、选择模型）
+2. 双击左侧列表中的配置即可激活
+3. 激活后，Claude Code 的下一个请求自动使用新的 API Key 和模型
 
-也可以通过 Homebrew Services 设置开机自启（macOS）：
+### 支持 AI 工具
 
-```bash
-brew services start token_gate
-```
-
-Linux 下可用 systemd 设置开机自启：
-
-```bash
-sudo tee /etc/systemd/system/token_gate.service > /dev/null <<EOF
-[Unit]
-Description=Token Gate
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/token_gate server
-Restart=always
-User=$USER
-
-[Install]
-WantedBy=default.target
-EOF
-sudo systemctl enable --now token_gate
-```
-
-启动后，Web 界面默认在 http://127.0.0.1:12123 打开。
-
-### 添加配置
-
-1. 打开 Web 界面，点击 **添加配置**
-2. 填写配置名称、API 地址、API Key 和模型
-3. API 地址支持预设选择（Anthropic 官方、智谱 AI 等），也可输入自定义地址
-4. 保存后配置出现在列表中
-
-### 切换配置
-
-在配置列表中点击任意配置进入详情页，通过开关将配置激活到对应的工具。激活后立即写入内存缓存，Claude Code（或其他工具）的**下一个请求即刻使用新的 API Key 和模型，无须新开会话**。
-
-### 查看用量
-
-在配置详情页中：
-
-- **概览卡片** — 显示总请求数、输入 Token 数、输出 Token 数
-- **趋势图表** — 以柱状图展示每日 Token 消耗趋势，可按输入/输出 Token 分别查看
-
-用量数据由代理自动从 SSE 响应中解析，无需额外配置。
-
-<img width="2758" height="1460" alt="用量图表" src="https://github.com/user-attachments/assets/1885563d-a365-4803-907c-3d584ee04bd4" />
-
-<img width="1390" height="530" alt="详情页" src="https://github.com/user-attachments/assets/2dcf0f77-1a82-4c4b-af36-28acda138009" />
+| 工具 | 状态 |
+|------|------|
+| Claude Code | 已支持 |
+| Cursor | 已支持 |
+| 更多工具 | 通过 Agent 扩展机制接入 |
 
 ## 工作原理
 
 ```
-AI 编程工具 (Claude Code)
+AI 编程工具 (Claude Code / Cursor)
         │
         ▼
   Token Gate 代理 (127.0.0.1:12121)
@@ -132,27 +62,39 @@ AI 编程工具 (Claude Code)
         ├─ 注入当前激活的 API Key
         ├─ 替换请求中的模型字段
         ├─ 透传 SSE 流式响应
-        └─ 异步解析并记录 Token 用量到本地数据库
+        └─ 异步解析并记录 Token 用量
         │
         ▼
    上游 API（api.anthropic.com 或任意供应商）
 ```
 
-三个本地端口各司其职：
-
 | 端口   | 用途             |
 |--------|-----------------|
 | 12121  | API 代理         |
 | 12122  | 配置管理 API     |
-| 12123  | Web 管理界面     |
 
 所有端口仅绑定 `127.0.0.1`，数据不离开本机。
 
+## 从源码构建
+
+需要 Go 1.21+ 和 Flutter 3.x。
+
+```bash
+git clone https://github.com/simpossible/token_gate.git
+cd token_gate
+
+# 构建 Flutter 桌面应用（自动编译 Go 二进制）
+cd server && make app
+
+# 或仅构建 Go 二进制
+cd server && make build
+```
+
 ## 技术栈
 
-- **后端** — Go，SQLite，HTTP 反向代理
-- **前端** — Vue 3 + Element Plus + ECharts
-- **构建** — 前端编译后通过 `go:embed` 嵌入 Go 二进制，最终产物为单个可执行文件
+- **桌面应用** — Flutter (macOS)，内嵌 Go daemon
+- **代理后端** — Go，SQLite，HTTP 反向代理
+- **状态栏** — tray_manager，实时 SSE 事件推送
 
 ## 许可证
 

@@ -10,3 +10,13 @@ token_gate_darwin_arm64.tar.gz
 settings.local.json
 diff_result.html
 token_gate
+
+# Signing / notarization credentials (never commit these)
+.env
+.env.*
+*.p12
+*.cer
+*.certSigningRequest
+
+# DMG build output
+build/
