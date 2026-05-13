@@ -137,12 +137,31 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Padding(
-        padding: const EdgeInsets.only(top: 28),
+        padding: EdgeInsets.only(top: Platform.isMacOS ? 28 : 0),
         child: Stack(
           children: [
             // ── Main content ────────────────────────────────────────────────
             Column(
             children: [
+              // Windows title bar with close button
+              if (Platform.isWindows)
+                DragToMoveArea(
+                  child: Container(
+                    height: 28,
+                    color: Colors.white,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 14),
+                    child: GestureDetector(
+                      onTap: () async {
+                        await windowManager.hide();
+                      },
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: const Icon(Icons.close, size: 16, color: Color(0xFF9CA3AF)),
+                      ),
+                    ),
+                  ),
+                ),
               _TopBar(
                 agentsAsync: agentsAsync,
                 selectedAgentType: selectedAgentType,
@@ -246,7 +265,7 @@ class _TopBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final newVersion = ref.watch(newVersionProvider);
-    return DragToMoveArea(
+    final menuBar = DragToMoveArea(
       child: Container(
         height: 52,
         decoration: BoxDecoration(
@@ -410,6 +429,8 @@ class _TopBar extends ConsumerWidget {
         ),
       ),
     );
+
+    return menuBar;
   }
 }
 

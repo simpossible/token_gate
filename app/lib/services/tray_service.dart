@@ -20,7 +20,10 @@ class TrayService with TrayListener {
   Future<void> init() async {
     _log.info('TrayService', 'initializing tray');
     trayManager.addListener(this);
-    await trayManager.setIcon('assets/icons/tray_icon.png');
+    final iconPath = Platform.isWindows
+        ? 'assets/icons/tray_icon.ico'
+        : 'assets/icons/tray_icon.png';
+    await trayManager.setIcon(iconPath);
     await _buildMenu();
 
     // Subscribe to total_token_change events
@@ -95,6 +98,11 @@ class TrayService with TrayListener {
   void onTrayIconMouseDown() {
     windowManager.show();
     windowManager.focus();
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    trayManager.popUpContextMenu();
   }
 
   void dispose() {

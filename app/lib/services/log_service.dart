@@ -7,10 +7,18 @@ const _maxBackups = 2;
 
 class LogService {
   static String get logDirPath {
-    final home = Platform.environment['HOME'] ??
-        Platform.environment['USERPROFILE'] ??
-        '.';
-    return '$home/.token_gate/logs';
+    // Use USERPROFILE on Windows, HOME on Unix-like systems
+    String? home;
+    if (Platform.isWindows) {
+      home = Platform.environment['USERPROFILE'];
+    } else {
+      home = Platform.environment['HOME'];
+    }
+    if (home == null) {
+      home = '.';
+    }
+    // Use native path separators
+    return '${Directory(home!).absolute.path}${Platform.pathSeparator}.token_gate${Platform.pathSeparator}logs';
   }
 
   static String get logFilePath => '$logDirPath/flutter.log';
