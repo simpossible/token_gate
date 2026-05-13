@@ -14,6 +14,7 @@
 
 <img width="800" alt="主界面" src="docs/home.jpg" />
 
+实时日志
 <img width="800" alt="实时日志" src="docs/log.jpg" />
 
 ## 安装
@@ -44,7 +45,7 @@ brew install --cask token-gate
 | 工具 | 状态 |
 |------|------|
 | Claude Code | 已支持 |
-| Cursor | 已支持 |
+| Cursor | 暂不支持 |
 | 更多工具 | 通过 Agent 扩展机制接入 |
 
 ## 工作原理
