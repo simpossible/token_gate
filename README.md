@@ -2,13 +2,15 @@
 
 本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 Key 管理、实时切换和 Token 用量可视化。
 
+官网：https://tokengate.mikevillage.com/index.html
+
 ## 功能
 
 - **多 API Key 管理** — 存储来自 Anthropic、智谱、DeepSeek、Kimi 等供应商的密钥
 - **实时切换** — 会话中途切换供应商或模型，下一个请求即时生效，无须新开会话
 - **Token 用量可视化** — 查看每个配置的请求数、输入/输出 Token 数量和时延趋势
 - **实时日志** — 逐行查看代理转发的请求和响应内容
-- **状态栏显示** — macOS 菜单栏实时显示 Token 消耗
+- **状态栏显示** — macOS 菜单栏 / Windows 系统托盘实时显示 Token 消耗
 
 ## 截图
 
@@ -31,6 +33,12 @@ brew install --cask token-gate
 从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载 DMG，双击打开，将 TokenGate 拖入 Applications 文件夹。
 
 首次打开时，macOS 可能会提示"无法验证开发者"。右键点击应用 → 选择"打开" → 点击"打开"确认即可。
+
+### Windows
+
+从 [GitHub Releases](https://github.com/simpossible/token_gate/releases/latest) 下载 `TokenGate-x.x.x-setup.exe` 安装程序，运行即可。
+
+安装程序支持自定义安装路径，默认安装到 `Program Files\TokenGate`。如果应用正在运行，安装前会自动关闭旧版本。
 
 ## 使用
 
@@ -89,7 +97,7 @@ cd server && make build
 
 ## 技术栈
 
-- **桌面应用** — Flutter (macOS)，内嵌 Go daemon
+- **桌面应用** — Flutter (macOS / Windows)，内嵌 Go daemon
 - **代理后端** — Go，SQLite，HTTP 反向代理
 - **状态栏** — tray_manager，实时 SSE 事件推送
 
