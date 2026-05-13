@@ -9,20 +9,23 @@ import '../models/usage_stats.dart';
 import '../services/api_service.dart';
 import '../services/backend_service.dart';
 import '../services/event_service.dart';
+import '../services/log_service.dart';
 import '../services/tray_service.dart';
 
 // ── Core services ──────────────────────────────────────────────────────────
 
+final logServiceProvider = Provider<LogService>((ref) => LogService());
+
 final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
 
-final eventServiceProvider = Provider<EventService>((ref) => EventService());
+final eventServiceProvider = Provider<EventService>((ref) => EventService(ref.read(logServiceProvider)));
 
 final backendServiceProvider = Provider<BackendService>(
-  (ref) => BackendService(ref.read(apiServiceProvider)),
+  (ref) => BackendService(ref.read(apiServiceProvider), ref.read(logServiceProvider)),
 );
 
 final trayServiceProvider = Provider<TrayService>(
-  (ref) => TrayService(ref.read(eventServiceProvider)),
+  (ref) => TrayService(ref.read(eventServiceProvider), ref.read(logServiceProvider)),
 );
 
 // ── Selected state ─────────────────────────────────────────────────────────

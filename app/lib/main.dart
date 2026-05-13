@@ -66,10 +66,14 @@ class _StartupState extends ConsumerState<_Startup> {
   }
 
   Future<void> _boot() async {
+    final log = ref.read(logServiceProvider);
+    await log.info('App', '=== TokenGate starting ===');
     try {
       await ref.read(backendServiceProvider).ensureRunning();
+      await log.info('App', 'backend ready, showing HomeView');
       if (mounted) setState(() => _ready = true);
     } catch (e) {
+      await log.error('App', 'startup failed', e);
       if (mounted) setState(() => _error = e.toString());
     }
   }

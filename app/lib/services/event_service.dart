@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+import 'log_service.dart';
 
 const _base = 'http://127.0.0.1:12122';
 
@@ -15,13 +16,14 @@ class EventMessage {
 class EventConnection {
   final String connType;
   final String? configId;
+  final LogService _log;
   http.Client? _client;
   StreamSubscription? _subscription;
   StreamController<EventMessage>? _controller;
   Timer? _reconnectTimer;
   bool _disposed = false;
 
-  EventConnection({required this.connType, this.configId});
+  EventConnection({required this.connType, this.configId, required LogService log}) : _log = log;
 
   Stream<EventMessage> connect() {
     _controller = StreamController<EventMessage>.broadcast();
@@ -37,12 +39,12 @@ class EventConnection {
       url += '&config_id=$configId';
     }
 
-    debugPrint('[EventService] connecting to $url');
+    _log.info('EventService', 'connecting to $url');
     _client = http.Client();
     final request = http.Request('GET', Uri.parse(url));
 
     _client!.send(request).then((streamedResponse) {
-      debugPrint('[EventService] SSE connected: status=${streamedResponse.statusCode}, connType=$connType, configId=$configId');
+      _log.info('EventService', 'SSE connected: status=${streamedResponse.statusCode}, connType=$connType, configId=$configId');
       final stream = streamedResponse.stream;
       String buffer = '';
       String currentEvent = '';
@@ -59,14 +61,14 @@ class EventConnection {
               currentEvent = line.substring(7).trim();
             } else if (line.startsWith('data: ')) {
               final dataStr = line.substring(6);
-              debugPrint('[EventService] SSE event=$currentEvent data=$dataStr');
+              _log.info('EventService', 'SSE event=$currentEvent data=$dataStr');
               try {
                 final json = jsonDecode(dataStr) as Map<String, dynamic>;
                 if (currentEvent.isNotEmpty && _controller != null && !_controller!.isClosed) {
                   _controller!.add(EventMessage(currentEvent, json));
                 }
               } catch (e) {
-                debugPrint('[EventService] SSE parse error: $e');
+                _log.error('EventService', 'SSE parse error', e);
               }
               currentEvent = '';
             } else if (line.trim().isEmpty) {
@@ -75,16 +77,16 @@ class EventConnection {
           }
         },
         onError: (e) {
-          debugPrint('[EventService] SSE stream error: $e');
+          _log.error('EventService', 'SSE stream error', e);
           _scheduleReconnect();
         },
         onDone: () {
-          debugPrint('[EventService] SSE stream done (closed by server), reconnecting...');
+          _log.info('EventService', 'SSE stream done (closed by server), reconnecting...');
           _scheduleReconnect();
         },
       );
     }).catchError((e) {
-      debugPrint('[EventService] SSE connection failed: $e');
+      _log.error('EventService', 'SSE connection failed', e);
       _scheduleReconnect();
     });
   }
@@ -92,7 +94,7 @@ class EventConnection {
   void _scheduleReconnect() {
     if (_disposed) return;
     _reconnectTimer?.cancel();
-    debugPrint('[EventService] reconnecting in 3s... (connType=$connType, configId=$configId)');
+    _log.info('EventService', 'reconnecting in 3s... (connType=$connType, configId=$configId)');
     _reconnectTimer = Timer(const Duration(seconds: 3), () {
       _cleanup();
       _doConnect();
@@ -107,7 +109,7 @@ class EventConnection {
   }
 
   void dispose() {
-    debugPrint('[EventService] disposing connection: connType=$connType, configId=$configId');
+    _log.info('EventService', 'disposing connection: connType=$connType, configId=$configId');
     _disposed = true;
     _reconnectTimer?.cancel();
     _cleanup();
@@ -117,13 +119,16 @@ class EventConnection {
 
 class EventService {
   final Map<String, EventConnection> _connections = {};
+  final LogService _log;
+
+  EventService(this._log);
 
   Stream<EventMessage> connect(String connType, {String? configId}) {
     final key = '${connType}_${configId ?? ""}';
-    debugPrint('[EventService] connect() called: key=$key');
+    _log.info('EventService', 'connect() called: key=$key');
     disconnect(key);
 
-    final conn = EventConnection(connType: connType, configId: configId);
+    final conn = EventConnection(connType: connType, configId: configId, log: _log);
     _connections[key] = conn;
     return conn.connect();
   }
@@ -131,7 +136,7 @@ class EventService {
   void disconnect(String key) {
     final existing = _connections.remove(key);
     if (existing != null) {
-      debugPrint('[EventService] disconnecting: key=$key');
+      _log.info('EventService', 'disconnecting: key=$key');
       existing.dispose();
     }
   }

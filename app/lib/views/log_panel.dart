@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../services/event_service.dart';
+import '../services/log_service.dart';
 
 class LogPanel extends StatefulWidget {
   final String configId;
   final String configName;
   final EventService eventService;
+  final LogService logService;
   final VoidCallback onClose;
 
   const LogPanel({
@@ -14,6 +16,7 @@ class LogPanel extends StatefulWidget {
     required this.configId,
     required this.configName,
     required this.eventService,
+    required this.logService,
     required this.onClose,
   });
 
@@ -29,10 +32,10 @@ class _LogPanelState extends State<LogPanel> {
   @override
   void initState() {
     super.initState();
-    debugPrint('[LogPanel] initState: configId=${widget.configId}, configName=${widget.configName}');
+    widget.logService.info('LogPanel', 'initState: configId=${widget.configId}, configName=${widget.configName}');
     final stream = widget.eventService.connect('log', configId: widget.configId);
     _subscription = stream.listen((msg) {
-      debugPrint('[LogPanel] received event: type=${msg.type}, data=${msg.data}');
+      widget.logService.info('LogPanel', 'received event: type=${msg.type}');
       _onEvent(msg);
     });
   }
@@ -47,7 +50,6 @@ class _LogPanelState extends State<LogPanel> {
       if (message.length > _maxLineLen) {
         message = '${message.substring(0, _maxLineLen)}... (${message.length} chars)';
       }
-      debugPrint('[LogPanel] gate_log message: ${message.substring(0, message.length > 100 ? 100 : message.length)}');
       setState(() {
         _logs.add(message);
       });

@@ -68,7 +68,10 @@ func dataDir() string {
 }
 
 func pidPath() string { return filepath.Join(dataDir(), "token_gate.pid") }
-func logPath() string { return filepath.Join(dataDir(), "logs", "token_gate.log") }
+func logPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".token_gate", "logs", "token_gate.log")
+}
 
 // --- process helpers ---
 

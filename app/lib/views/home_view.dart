@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../models/agent.dart';
 import '../models/token_config.dart';
 import '../providers/providers.dart';
 import '../providers/update_provider.dart';
+import '../services/log_service.dart';
 import 'config_detail.dart';
 import 'config_form.dart';
 import 'config_list.dart';
@@ -84,6 +86,23 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
     setState(() => _showForm = false);
   }
 
+  void _openLogDir() async {
+    final log = ref.read(logServiceProvider);
+    final dir = LogService.logDirPath;
+    log.info('HomeView', 'opening log directory: $dir');
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', [dir]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [dir]);
+      } else {
+        await Process.run('explorer', [dir]);
+      }
+    } catch (e) {
+      log.error('HomeView', 'failed to open log directory', e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final agentsAsync = ref.watch(agentsProvider);
@@ -128,6 +147,7 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
                   ref.read(configsProvider.notifier).reload();
                 },
                 onCreateTap: _openCreate,
+                onOpenLogs: _openLogDir,
               ),
               Expanded(
                 child: Row(
@@ -166,6 +186,7 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
                 configId: _logPanelConfigId!,
                 configName: _logPanelConfigName ?? '',
                 eventService: ref.read(eventServiceProvider),
+                logService: ref.read(logServiceProvider),
                 onClose: () {
                   setState(() {
                     _showLogPanel = false;
@@ -207,12 +228,14 @@ class _TopBar extends ConsumerWidget {
   final String selectedAgentType;
   final ValueChanged<String> onAgentChanged;
   final VoidCallback onCreateTap;
+  final VoidCallback onOpenLogs;
 
   const _TopBar({
     required this.agentsAsync,
     required this.selectedAgentType,
     required this.onAgentChanged,
     required this.onCreateTap,
+    required this.onOpenLogs,
   });
 
   @override
@@ -333,22 +356,49 @@ class _TopBar extends ConsumerWidget {
             ),
             const SizedBox(width: 12),
 
-            // Create button
-            SizedBox(
-              height: 32,
-              width: 32,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: const Icon(Icons.add, size: 20),
-                style: IconButton.styleFrom(
-                  backgroundColor: const Color(0xFF6366F1),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+            // More menu
+            PopupMenuButton<String>(
+              position: PopupMenuPosition.under,
+              offset: const Offset(0, 4),
+              onSelected: (value) {
+                if (value == 'create') {
+                  onCreateTap();
+                } else if (value == 'logs') {
+                  onOpenLogs();
+                }
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem<String>(
+                  value: 'create',
+                  height: 32,
+                  child: Row(
+                    children: [
+                      Icon(Icons.add, size: 16, color: Color(0xFF374151)),
+                      SizedBox(width: 8),
+                      Text('创建配置', style: TextStyle(fontSize: 13)),
+                    ],
                   ),
                 ),
-                onPressed: onCreateTap,
-                tooltip: '创建配置',
+                const PopupMenuItem<String>(
+                  value: 'logs',
+                  height: 32,
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_open, size: 16, color: Color(0xFF374151)),
+                      SizedBox(width: 8),
+                      Text('查看日志', style: TextStyle(fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ],
+              child: Container(
+                height: 32,
+                width: 32,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.menu, size: 18, color: Colors.white),
               ),
             ),
           ],

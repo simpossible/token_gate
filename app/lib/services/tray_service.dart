@@ -4,17 +4,20 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'event_service.dart';
+import 'log_service.dart';
 
 class TrayService with TrayListener {
   final EventService _eventService;
+  final LogService _log;
   StreamSubscription? _subscription;
   int _deltaInput = 0;
   int _deltaOutput = 0;
   Timer? _clearTimer;
 
-  TrayService(this._eventService);
+  TrayService(this._eventService, this._log);
 
   Future<void> init() async {
+    _log.info('TrayService', 'initializing tray');
     trayManager.addListener(this);
     await trayManager.setIcon('assets/icons/tray_icon.png');
     await _buildMenu();
@@ -31,6 +34,7 @@ class TrayService with TrayListener {
       final addedOut = payload['added_out_tokens'] as int? ?? 0;
       _deltaInput += addedIn;
       _deltaOutput += addedOut;
+      _log.info('TrayService', 'token change: +$addedIn in, +$addedOut out');
       _updateTitle();
 
       // Reset clear timer on each event
