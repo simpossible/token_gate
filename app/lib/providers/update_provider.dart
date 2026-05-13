@@ -38,7 +38,7 @@ String _generateUUID() {
   return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
 }
 
-Future<void> checkForUpdate(Ref ref) async {
+Future<void> checkForUpdate(WidgetRef ref) async {
   final deviceId = await ref.read(deviceIdProvider.future);
   if (deviceId == null) return;
 
@@ -49,7 +49,17 @@ Future<void> checkForUpdate(Ref ref) async {
   final packageInfo = await PackageInfo.fromPlatform();
   final currentVersion = packageInfo.version;
 
-  if (remoteVersion != currentVersion) {
+  if (_isNewer(remoteVersion, currentVersion)) {
     ref.read(newVersionProvider.notifier).state = remoteVersion;
   }
+}
+
+bool _isNewer(String remote, String current) {
+  final r = remote.split('.').map(int.parse).toList();
+  final c = current.split('.').map(int.parse).toList();
+  for (var i = 0; i < r.length && i < c.length; i++) {
+    if (r[i] > c[i]) return true;
+    if (r[i] < c[i]) return false;
+  }
+  return r.length > c.length;
 }
