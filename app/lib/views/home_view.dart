@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
@@ -5,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import '../models/agent.dart';
 import '../models/token_config.dart';
 import '../providers/providers.dart';
+import '../providers/update_provider.dart';
 import 'config_detail.dart';
 import 'config_form.dart';
 import 'config_list.dart';
@@ -24,12 +27,21 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
   bool _showLogPanel = false;
   String? _logPanelConfigId;
   String? _logPanelConfigName;
+  Timer? _updateCheckTimer;
 
   @override
   void initState() {
     super.initState();
     windowManager.addListener(this);
     _initTray();
+    _startUpdateCheck();
+  }
+
+  void _startUpdateCheck() {
+    checkForUpdate(ref);
+    _updateCheckTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      checkForUpdate(ref);
+    });
   }
 
   Future<void> _initTray() async {
@@ -42,6 +54,7 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
 
   @override
   void dispose() {
+    _updateCheckTimer?.cancel();
     windowManager.removeListener(this);
     ref.read(trayServiceProvider).dispose();
     super.dispose();
@@ -189,7 +202,7 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
 
 // ── Top bar ──────────────────────────────────────────────────────────────────
 
-class _TopBar extends StatelessWidget {
+class _TopBar extends ConsumerWidget {
   final AsyncValue agentsAsync;
   final String selectedAgentType;
   final ValueChanged<String> onAgentChanged;
@@ -203,7 +216,8 @@ class _TopBar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final newVersion = ref.watch(newVersionProvider);
     return DragToMoveArea(
       child: Container(
         height: 52,
@@ -227,6 +241,38 @@ class _TopBar extends StatelessWidget {
               ),
             ),
             const Spacer(),
+
+            // New version indicator
+            if (newVersion != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Container(
+                    height: 28,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withAlpha(25),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_upward, size: 14, color: Color(0xFF6366F1)),
+                        SizedBox(width: 4),
+                        Text(
+                          '有新版本',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF6366F1),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
 
             // Agent type selector
             agentsAsync.when(

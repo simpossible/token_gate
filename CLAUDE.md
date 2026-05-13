@@ -198,9 +198,11 @@ app/
 │   │   ├── api_service.dart         # 封装全部 :12122 REST 调用，含 isAlive() 健康检查
 │   │   ├── event_service.dart       # SSE 客户端：手动解析 SSE 格式，按 key 管理连接，自动重连(3s)
 │   │   ├── backend_service.dart     # ensureRunning(): 检测→释放二进制→启动→等待就绪(5s)
+│   │   ├── update_service.dart      # 版本更新检查：调用远端 /api/new_version 接口
 │   │   └── tray_service.dart        # 状态栏：监听 total_token_change 事件更新 ↑xK ↓xK
 │   ├── providers/
-│   │   └── providers.dart           # Riverpod providers（见下）
+│   │   ├── providers.dart           # Riverpod providers（见下）
+│   │   └── update_provider.dart     # 版本更新：deviceId 生成/持久化 + newVersionProvider + checkForUpdate
 │   └── views/
 │       ├── home_view.dart           # 主布局：顶部栏 + 左右分栏 + LogPanel overlay，持有 WindowListener
 │       ├── config_list.dart         # 左侧 220pt 卡片列表，单击选中/双击 activate
@@ -334,6 +336,47 @@ registerShutdownSignals(ch chan os.Signal) // SIGTERM+SIGINT on Unix, Interrupt 
 `main.go` imports neither `syscall` nor `os/signal` directly — all platform-specific calls go through these helpers.
 
 **`~/.claude/settings.json` path**: `os.UserHomeDir()` + `.claude/settings.json` works on all three platforms (Claude Code CLI follows Unix dotfile convention even on Windows).
+
+## Version Update Check System
+
+### Remote Service (`token_gate_remote/`)
+
+A standalone Go HTTP service deployed separately from Token Gate. Provides version checking and DAU statistics.
+
+**Port**: 12124 (configurable via `PORT` env var)
+
+**Endpoints**:
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/new_version?device_id=xxx&platform=mac` | GET | Returns latest version for platform, records device activity for DAU |
+| `/api/stats/dau` | GET | Returns today's DAU count (unique device_ids) |
+
+**Config file** (`config.json` in working directory):
+```json
+{
+  "mac": { "new_version": "2.0.0" },
+  "windows": { "new_version": "2.0.0" },
+  "linux": { "new_version": "2.0.0" }
+}
+```
+Reloaded every 5 minutes. Edit and save to update versions across all running instances.
+
+**DAU tracking**: SQLite database (`token_gate_remote.db`) with `device_activity` table (device_id, platform, date). Uses `INSERT OR IGNORE` for idempotent writes.
+
+### Flutter App Side
+
+- **Device ID**: Generated as UUID v4 on first launch, persisted via `shared_preferences` (key: `token_gate_device_id`)
+- **Update check**: `checkForUpdate()` in `update_provider.dart` calls remote service, compares with `package_info_plus` version
+- **Timing**: Checked once on startup, then every hour via `Timer.periodic` in `HomeView`
+- **UI**: Purple "有新版本" badge in top bar (between spacer and agent dropdown), controlled by `newVersionProvider`
+
+### Provider Setup (`update_provider.dart`)
+
+| Provider | Type | Description |
+|----------|------|-------------|
+| `updateServiceProvider` | `Provider<UpdateService>` | HTTP client for remote version API |
+| `deviceIdProvider` | `FutureProvider<String>` | UUID persisted in shared_preferences |
+| `newVersionProvider` | `StateProvider<String?>` | null = no update, string = new version available |
 
 ## attendion
 每次重要的功能设计变更要更新到项目知识文档中
