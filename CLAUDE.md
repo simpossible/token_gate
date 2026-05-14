@@ -279,12 +279,12 @@ app/
 │   │   ├── debug_inspector_provider.dart # DebugInspectorNotifier：聚合 gate_debug 事件为 RequestEntry
 │   │   └── update_provider.dart     # 版本更新：deviceId 生成/持久化 + newVersionProvider + checkForUpdate
 │   └── views/
-│       ├── home_view.dart           # 主布局：顶部栏 + 左右分栏 + LogPanel overlay，持有 WindowListener
+│       ├── home_view.dart           # 主布局：顶部栏 + 左右分栏 + overlay panels，持有 WindowListener
 │       ├── config_list.dart         # 左侧 220pt 卡片列表，单击选中/双击 activate
-│       ├── config_detail.dart       # 右侧详情：监听 usage_new 实时刷新 + 日志按钮
+│       ├── config_detail.dart       # 右侧详情：监听 usage_new 实时刷新 + 调试按钮
 │       ├── config_form.dart         # 创建/编辑表单（BottomSheet），含厂商预设下拉
 │       ├── debug_inspector_overlay.dart # Network调试面板：三栏布局，请求列表/详情/RawLog
-│       └── log_panel.dart           # 720pt 黑色半透明日志面板，右侧滑入，监听 gate_log
+│       └── proxy_panel.dart         # 代理设置面板
 ├── assets/
 │   ├── bin/token_gate               # 编译好的 Go 二进制（make app 自动注入）
 │   └── icons/tray_icon.png          # 状态栏图标（22×22）
@@ -587,13 +587,17 @@ Global HTTP proxy configuration for routing outgoing API requests through a prox
 
 ### v0.2.6
 - **Feat:** Network 调试面板（Debug Inspector）— Chrome DevTools 风格的请求检查器
-  - 三栏布局：请求列表 / 详情（Header·Payload·Response） / Raw Log
+  - 三栏布局：请求列表 / 详情（Header·Payload·Response） / Raw Log（默认显示，比例 44:100:80）
   - 可拖拽分栏调整宽度，Raw Log 面板可隐藏/显示（状态持久化）
   - Go 端新增 `gate_debug` 结构化 SSE 事件（request_start/headers/body/response_headers/chunk/end）
   - Flutter 端 `DebugInspectorNotifier` 聚合事件为 `DebugRequestEntry`，支持 SSE 流式追加
-  - `Cmd+F` 全局搜索，跨 tab 黄色高亮匹配，`Esc` 关闭
+  - 独立搜索：Detail 和 Raw Log 各自独立的搜索栏，Cmd+F 根据鼠标所在区域激活
+  - 搜索导航：Enter 键逐个跳转匹配项，显示 `a / b` 计数，当前匹配橙色高亮
+  - Raw Log 支持跨行选择和 Cmd+A（SelectionArea）
   - Response tab 自动滚动开关（streaming 场景）
 - **Feat:** ConfigDetail 增加 bug 图标按钮打开调试面板
+- **Refactor:** 移除旧 LogPanel 和 ConfigDetail 实时日志按钮，Debug Inspector Raw Log 完全替代
+- **Feat:** 窗口支持自由缩放（最小 800×400）
 
 ### v0.2.5
 - **Fix:** ConfigDetail not updating when switching configs — added `didUpdateWidget` to re-subscribe SSE and refresh data
