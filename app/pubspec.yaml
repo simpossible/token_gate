@@ -2,7 +2,7 @@ name: token_gate_app
 description: "Token Gate desktop app — manages Claude API keys and monitors token usage."
 publish_to: 'none'
 
-version: 0.2.5+1
+version: 0.2.6+1
 
 environment:
   sdk: ^3.11.5

@@ -171,6 +171,7 @@ Go backend pushes events to Flutter via SSE (Server-Sent Events). `internal/even
 | `event` | `GET /api/events?type=event&config_id=xxx` | `usage_new` | ConfigDetail (auto-refresh stats/charts) |
 | `event` | `GET /api/events?type=event` | `total_token_change` | TrayService (replaces 5s polling) |
 | `log` | `GET /api/events?type=log&config_id=xxx` | `gate_log` | Log panel (real-time request/response log) |
+| `log` | `GET /api/events?type=log&config_id=xxx` | `gate_debug` | Debug inspector (structured request lifecycle events) |
 
 **Event payloads:**
 
@@ -180,6 +181,15 @@ Go backend pushes events to Flutter via SSE (Server-Sent Events). `internal/even
   3. SSE streaming: each `data:` line pushed individually in real-time
   4. Non-SSE response: full pretty-printed response JSON
   5. Response summary line: `"14:30:03 ← ↑185 ↓79 1569ms streaming"`
+- `gate_debug`: structured event with `kind` field — published at each proxy lifecycle stage:
+  1. `request_start` — method, path, target_url, agent_type, model
+  2. `request_headers` — client request headers + forwarded headers (Authorization NOT masked — local tool)
+  3. `request_body` — pretty-printed request JSON body
+  4. `response_headers` — status code + response headers from upstream
+  5. `response_chunk` — each SSE `data:` line (streaming responses)
+  6. `request_end` — latency/ttfb, usage (input/output tokens), completed flag
+  - Each event carries `req_id` (short random ID) and `ts_ms` for correlation
+  - Flutter `DebugInspectorNotifier` aggregates events by `req_id` into `DebugRequestEntry` objects
 - `usage_new`: `{input_tokens, output_tokens, latency_ms}` — pushed after usage recorded in DB
 - `total_token_change`: `{added_in_tokens, added_out_tokens}` — global, for tray title update
 
@@ -266,12 +276,14 @@ app/
 │   │   └── tray_service.dart        # 状态栏：监听 total_token_change 事件更新 ↑xK ↓xK
 │   ├── providers/
 │   │   ├── providers.dart           # Riverpod providers（见下）
+│   │   ├── debug_inspector_provider.dart # DebugInspectorNotifier：聚合 gate_debug 事件为 RequestEntry
 │   │   └── update_provider.dart     # 版本更新：deviceId 生成/持久化 + newVersionProvider + checkForUpdate
 │   └── views/
 │       ├── home_view.dart           # 主布局：顶部栏 + 左右分栏 + LogPanel overlay，持有 WindowListener
 │       ├── config_list.dart         # 左侧 220pt 卡片列表，单击选中/双击 activate
 │       ├── config_detail.dart       # 右侧详情：监听 usage_new 实时刷新 + 日志按钮
 │       ├── config_form.dart         # 创建/编辑表单（BottomSheet），含厂商预设下拉
+│       ├── debug_inspector_overlay.dart # Network调试面板：三栏布局，请求列表/详情/RawLog
 │       └── log_panel.dart           # 720pt 黑色半透明日志面板，右侧滑入，监听 gate_log
 ├── assets/
 │   ├── bin/token_gate               # 编译好的 Go 二进制（make app 自动注入）
@@ -320,6 +332,7 @@ main() → windowManager.ensureInitialized() → 固定窗口参数
 | `usagesProvider(id)` | `FutureProvider.family<List<UsageEntry>, int>` | GET /api/usages?config_id=id |
 | `latencyProvider(id)` | `FutureProvider.family<List<LatencyEntry>, int>` | GET /api/latency/latest |
 | `companiesProvider` | `FutureProvider<List<Company>>` | GET /api/companies |
+| `debugInspectorProvider(configId)` | `StateNotifierProvider.family<DebugInspectorNotifier, DebugInspectorState, String>` | 聚合 gate_debug 事件为请求列表（max 200），订阅 `log` SSE |
 
 `ConfigsNotifier` 提供 `activate(id)` / `deactivate(id)` / `delete(id)` / `reload()` 方法，调用后自动刷新列表。
 
@@ -338,6 +351,42 @@ main() → windowManager.ensureInitialized() → 固定窗口参数
 ```
 
 无选中配置时右侧显示空状态（大"创建新配置"按钮）。创建/编辑通过 `DraggableScrollableSheet` 从底部滑入。
+
+### Debug Inspector（Network 调试面板）
+
+类似 Chrome DevTools Network 面板，通过 ConfigDetail 头部的虫子图标（`Icons.bug_report_outlined`）打开。覆盖 ConfigDetail 区域（`Positioned(top:52, left:220, right:0, bottom:0)`）。
+
+**三栏布局：**
+
+| 区域 | 宽度 | 内容 |
+|------|------|------|
+| area-1（请求列表） | 240pt，可拖拽 150-400 | 每个请求显示 method badge + path + status（颜色编码）+ latency |
+| area-2（详情） | Expanded | 三个 tab：Header（key-value 表格）/ Payload（request body）/ Response（SSE 流式追加，自动滚动） |
+| area-3（Raw Log） | 280pt，可隐藏/可拖拽 150-500 | 复用 `gate_log` 的原始文本流，深色主题，显示/隐藏状态通过 `SharedPreferences` 记忆 |
+
+**数据流：**
+
+```
+Go proxy lifecycle → publishDebug(gate_debug, kind=request_start|request_headers|...)
+  → SSE /api/events?type=log&config_id=xxx
+  → Flutter EventService → DebugInspectorNotifier._onEvent()
+  → 按 req_id 聚合为 DebugRequestEntry（max 200）
+```
+
+**搜索功能：**
+- `Cmd+F` / `Ctrl+F` 快捷键或点击搜索图标唤起搜索栏
+- `Esc` 关闭搜索
+- 搜索时所有 tab 内容用 `RichText` + 黄色高亮（`Color(0xFFFFF3B0)`）显示匹配
+- Header tab 搜索时切换为纯文本视图（key: value 格式）
+- Raw Log 每行也支持搜索高亮
+- 显示当前 tab 匹配数（`_searchMatchCount`）
+
+**关键文件：**
+- `server/internal/proxy/proxy.go` — `publishDebug()` 在请求生命周期各阶段发送结构化事件
+- `app/lib/providers/debug_inspector_provider.dart` — `DebugInspectorNotifier` 聚合事件，维护 `entries` / `rawLogs` 列表
+- `app/lib/views/debug_inspector_overlay.dart` — 三栏 UI，`HardwareKeyboard` 监听 Cmd+F
+- `app/lib/views/config_detail.dart` — `onOpenDebug` 回调 + 虫子图标按钮
+- `app/lib/views/home_view.dart` — overlay `Positioned` 容器
 
 ### macOS 特殊配置
 
@@ -535,6 +584,16 @@ Global HTTP proxy configuration for routing outgoing API requests through a prox
 - `app/lib/views/proxy_panel.dart` — Proxy settings panel UI
 
 ## Release Changelog
+
+### v0.2.6
+- **Feat:** Network 调试面板（Debug Inspector）— Chrome DevTools 风格的请求检查器
+  - 三栏布局：请求列表 / 详情（Header·Payload·Response） / Raw Log
+  - 可拖拽分栏调整宽度，Raw Log 面板可隐藏/显示（状态持久化）
+  - Go 端新增 `gate_debug` 结构化 SSE 事件（request_start/headers/body/response_headers/chunk/end）
+  - Flutter 端 `DebugInspectorNotifier` 聚合事件为 `DebugRequestEntry`，支持 SSE 流式追加
+  - `Cmd+F` 全局搜索，跨 tab 黄色高亮匹配，`Esc` 关闭
+  - Response tab 自动滚动开关（streaming 场景）
+- **Feat:** ConfigDetail 增加 bug 图标按钮打开调试面板
 
 ### v0.2.5
 - **Fix:** ConfigDetail not updating when switching configs — added `didUpdateWidget` to re-subscribe SSE and refresh data
