@@ -14,7 +14,6 @@ import 'config_detail.dart';
 import 'config_form.dart';
 import 'config_list.dart';
 import 'debug_inspector_overlay.dart';
-import 'log_panel.dart';
 import 'proxy_panel.dart';
 
 class HomeView extends ConsumerStatefulWidget {
@@ -28,9 +27,6 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
   // edit mode: null = no sheet open; non-null = config being edited (or sentinel for create)
   bool _showForm = false;
   TokenConfig? _editingConfig;
-  bool _showLogPanel = false;
-  String? _logPanelConfigId;
-  String? _logPanelConfigName;
   bool _showProxyPanel = false;
   bool _showDebugInspector = false;
   String? _debugConfigId;
@@ -191,13 +187,6 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
                               config: selectedConfig,
                               onEdit: () => _openEdit(selectedConfig),
                               onDeleted: () {},
-                              onShowLog: () {
-                                setState(() {
-                                  _showLogPanel = true;
-                                  _logPanelConfigId = selectedConfig.id;
-                                  _logPanelConfigName = selectedConfig.name;
-                                });
-                              },
                               onOpenDebug: () {
                                 setState(() {
                                   _showDebugInspector = true;
@@ -213,27 +202,6 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
               ),
             ],
           ),
-
-          // Log panel overlay (right side)
-          if (_showLogPanel && _logPanelConfigId != null)
-            Positioned(
-              top: 52,
-              right: 0,
-              bottom: 0,
-              child: LogPanel(
-                configId: _logPanelConfigId!,
-                configName: _logPanelConfigName ?? '',
-                eventService: ref.read(eventServiceProvider),
-                logService: ref.read(logServiceProvider),
-                onClose: () {
-                  setState(() {
-                    _showLogPanel = false;
-                    _logPanelConfigId = null;
-                    _logPanelConfigName = null;
-                  });
-                },
-              ),
-            ),
 
           // Proxy panel overlay (covers ConfigDetail area)
           if (_showProxyPanel)

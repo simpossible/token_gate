@@ -82,7 +82,6 @@ class ConfigDetail extends ConsumerStatefulWidget {
   final TokenConfig config;
   final VoidCallback onEdit;
   final VoidCallback onDeleted;
-  final VoidCallback? onShowLog;
   final VoidCallback? onOpenDebug;
 
   const ConfigDetail({
@@ -90,7 +89,6 @@ class ConfigDetail extends ConsumerStatefulWidget {
     required this.config,
     required this.onEdit,
     required this.onDeleted,
-    this.onShowLog,
     this.onOpenDebug,
   });
 
@@ -212,12 +210,6 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
                 tooltip: '编辑',
                 onPressed: widget.onEdit,
               ),
-              if (widget.onShowLog != null)
-                IconButton(
-                  icon: const Icon(Icons.terminal, size: 18),
-                  tooltip: '实时日志',
-                  onPressed: widget.onShowLog,
-                ),
               IconButton(
                 icon: const Icon(Icons.delete_outline,
                     size: 18, color: Colors.red),
