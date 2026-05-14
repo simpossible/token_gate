@@ -38,8 +38,8 @@ class DebugInspectorOverlay extends ConsumerStatefulWidget {
 
 class _DebugInspectorOverlayState
     extends ConsumerState<DebugInspectorOverlay> {
-  double _area1Width = 240;
-  double _area3Width = 280;
+  double _area1Width = 150;
+  double _area3Width = 275;
   _DetailTab _selectedTab = _DetailTab.headers;
   final ScrollController _detailScrollController = ScrollController();
   final ScrollController _rawLogScrollController = ScrollController();

@@ -118,7 +118,7 @@ class DebugInspectorNotifier extends StateNotifier<DebugInspectorState> {
   Future<void> _init() async {
     // Load persisted showRawLog preference
     final prefs = await SharedPreferences.getInstance();
-    final showRawLog = prefs.getBool(_prefKeyShowRawLog) ?? false;
+    final showRawLog = prefs.getBool(_prefKeyShowRawLog) ?? true;
     state = state.copyWith(showRawLog: showRawLog);
 
     // Subscribe to SSE log stream
