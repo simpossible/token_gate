@@ -25,14 +25,15 @@ type API struct {
 	latencyCache *latency.Cache
 	companyMgr   *company.Manager
 	eventBus     *event.EventBus
+	buildID      string
 }
 
-func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor, latencyCache *latency.Cache, companyMgr *company.Manager, eventBus *event.EventBus) *API {
+func NewAPI(db *database.DB, cache *config.ActiveConfigCache, processors []agent.AgentProcessor, latencyCache *latency.Cache, companyMgr *company.Manager, eventBus *event.EventBus, buildID string) *API {
 	pm := make(map[string]agent.AgentProcessor)
 	for _, p := range processors {
 		pm[p.GetType()] = p
 	}
-	return &API{db: db, cache: cache, processors: pm, latencyCache: latencyCache, companyMgr: companyMgr, eventBus: eventBus}
+	return &API{db: db, cache: cache, processors: pm, latencyCache: latencyCache, companyMgr: companyMgr, eventBus: eventBus, buildID: buildID}
 }
 
 func (a *API) Routes() http.Handler {
@@ -42,6 +43,7 @@ func (a *API) Routes() http.Handler {
 	r.Post("/api/configs", a.createConfig)
 	r.Get("/api/configs", a.listConfigs)
 	r.Get("/api/agents", a.listAgents)
+	r.Get("/api/version", a.getVersion)
 	r.Get("/api/companies", a.getCompanies)
 	r.Get("/api/events", a.handleEvents)
 	r.Route("/api/configs/{id}", func(r chi.Router) {
@@ -69,6 +71,10 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (a *API) getVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"build_id": a.buildID})
 }
 
 func loggingMiddleware(next http.Handler) http.Handler {

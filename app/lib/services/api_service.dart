@@ -78,6 +78,15 @@ class ApiService {
     }
   }
 
+  Future<String?> getBuildID() async {
+    try {
+      final json = await _get('/api/version');
+      return json['build_id'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Agents — returns {"agents": [...]}
   Future<List<Agent>> listAgents() async {
     final json = await _get('/api/agents');

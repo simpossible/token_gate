@@ -69,6 +69,7 @@ func (db *DB) InitSchema() error {
 	// migrate from old schema: add agent_type and is_active columns
 	db.Exec("ALTER TABLE token_config ADD COLUMN agent_type TEXT NOT NULL DEFAULT ''")
 	db.Exec("ALTER TABLE token_config ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0")
+	db.Exec("ALTER TABLE token_config ADD COLUMN last_used_at INTEGER NOT NULL DEFAULT 0")
 
 	// migrate data from valid_config if it exists (old schema)
 	if err := db.migrateFromValidConfig(); err != nil {
@@ -164,7 +165,7 @@ func (db *DB) CreateTokenConfig(req *model.CreateConfigRequest) (*model.TokenCon
 	}
 	log.Printf("[DB] Creating token config: id=%s, name=%s, agent_type=%s", c.ID, c.Name, c.AgentType)
 	_, err := db.Exec(
-		"INSERT INTO token_config (id, name, url, api_key, model, agent_type, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO token_config (id, name, url, api_key, model, agent_type, is_active, created_at, updated_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
 		c.ID, c.Name, c.URL, c.APIKey, c.Model, c.AgentType, boolToInt(c.IsActive), c.CreatedAt, c.UpdatedAt,
 	)
 	if err != nil {
@@ -179,9 +180,9 @@ func (db *DB) GetTokenConfig(id string) (*model.TokenConfig, error) {
 	c := &model.TokenConfig{}
 	var isActive int
 	err := db.QueryRow(
-		"SELECT id, name, url, api_key, model, agent_type, is_active, created_at, updated_at FROM token_config WHERE id = ?",
+		"SELECT id, name, url, api_key, model, agent_type, is_active, last_used_at, created_at, updated_at FROM token_config WHERE id = ?",
 		id,
-	).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -190,7 +191,7 @@ func (db *DB) GetTokenConfig(id string) (*model.TokenConfig, error) {
 }
 
 func (db *DB) ListTokenConfigs() ([]*model.TokenConfig, error) {
-	rows, err := db.Query("SELECT id, name, url, api_key, model, agent_type, is_active, created_at, updated_at FROM token_config ORDER BY created_at")
+	rows, err := db.Query("SELECT id, name, url, api_key, model, agent_type, is_active, last_used_at, created_at, updated_at FROM token_config ORDER BY COALESCE(NULLIF(last_used_at, 0), CAST(strftime('%s', created_at) * 1000 AS INTEGER)) DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +201,7 @@ func (db *DB) ListTokenConfigs() ([]*model.TokenConfig, error) {
 }
 
 func (db *DB) ListTokenConfigsByAgentType(agentType string) ([]*model.TokenConfig, error) {
-	rows, err := db.Query("SELECT id, name, url, api_key, model, agent_type, is_active, created_at, updated_at FROM token_config WHERE agent_type = ? ORDER BY created_at", agentType)
+	rows, err := db.Query("SELECT id, name, url, api_key, model, agent_type, is_active, last_used_at, created_at, updated_at FROM token_config WHERE agent_type = ? ORDER BY COALESCE(NULLIF(last_used_at, 0), CAST(strftime('%s', created_at) * 1000 AS INTEGER)) DESC", agentType)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +215,7 @@ func scanTokenConfigs(rows *sql.Rows) ([]*model.TokenConfig, error) {
 	for rows.Next() {
 		c := &model.TokenConfig{}
 		var isActive int
-		if err := rows.Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
 		c.IsActive = isActive == 1
@@ -291,9 +292,9 @@ func (db *DB) GetActiveTokenConfigByAgentType(agentType string) (*model.TokenCon
 	c := &model.TokenConfig{}
 	var isActive int
 	err := db.QueryRow(
-		"SELECT id, name, url, api_key, model, agent_type, is_active, created_at, updated_at FROM token_config WHERE agent_type = ? AND is_active = 1",
+		"SELECT id, name, url, api_key, model, agent_type, is_active, last_used_at, created_at, updated_at FROM token_config WHERE agent_type = ? AND is_active = 1",
 		agentType,
-	).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.CreatedAt, &c.UpdatedAt)
+	).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -302,7 +303,7 @@ func (db *DB) GetActiveTokenConfigByAgentType(agentType string) (*model.TokenCon
 }
 
 func (db *DB) ListActiveTokenConfigs() ([]*model.TokenConfig, error) {
-	rows, err := db.Query("SELECT id, name, url, api_key, model, agent_type, is_active, created_at, updated_at FROM token_config WHERE is_active = 1")
+	rows, err := db.Query("SELECT id, name, url, api_key, model, agent_type, is_active, last_used_at, created_at, updated_at FROM token_config WHERE is_active = 1")
 	if err != nil {
 		return nil, err
 	}
@@ -332,11 +333,12 @@ func (db *DB) ActivateTokenConfig(tokenID string) (activated *model.TokenConfig,
 	// Find currently active config for the same agent_type
 	var deactID, deactName, deactURL, deactAPIKey, deactModel, deactAgentType string
 	var deactIsActive int
+		var deactLastUsedAt int64
 	var deactCreatedAt, deactUpdatedAt time.Time
 	err = tx.QueryRow(
-		"SELECT id, name, url, api_key, model, agent_type, is_active, created_at, updated_at FROM token_config WHERE agent_type = ? AND is_active = 1 AND id != ?",
+		"SELECT id, name, url, api_key, model, agent_type, is_active, last_used_at, created_at, updated_at FROM token_config WHERE agent_type = ? AND is_active = 1 AND id != ?",
 		activated.AgentType, tokenID,
-	).Scan(&deactID, &deactName, &deactURL, &deactAPIKey, &deactModel, &deactAgentType, &deactIsActive, &deactCreatedAt, &deactUpdatedAt)
+	).Scan(&deactID, &deactName, &deactURL, &deactAPIKey, &deactModel, &deactAgentType, &deactIsActive, &deactLastUsedAt, &deactCreatedAt, &deactUpdatedAt)
 	if err == nil {
 		deactivated = &model.TokenConfig{
 			ID:        deactID,
@@ -345,7 +347,8 @@ func (db *DB) ActivateTokenConfig(tokenID string) (activated *model.TokenConfig,
 			APIKey:    deactAPIKey,
 			Model:     deactModel,
 			AgentType: deactAgentType,
-			IsActive:  deactIsActive == 1,
+			IsActive:   deactIsActive == 1,
+				LastUsedAt: deactLastUsedAt,
 			CreatedAt: deactCreatedAt,
 			UpdatedAt: deactUpdatedAt,
 		}
@@ -356,7 +359,7 @@ func (db *DB) ActivateTokenConfig(tokenID string) (activated *model.TokenConfig,
 	}
 
 	// Activate the target
-	_, err = tx.Exec("UPDATE token_config SET is_active = 1 WHERE id = ?", tokenID)
+	_, err = tx.Exec("UPDATE token_config SET is_active = 1, last_used_at = ? WHERE id = ?", time.Now().UnixMilli(), tokenID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("activate target: %w", err)
 	}
@@ -366,6 +369,7 @@ func (db *DB) ActivateTokenConfig(tokenID string) (activated *model.TokenConfig,
 	}
 
 	activated.IsActive = true
+		activated.LastUsedAt = time.Now().UnixMilli()
 	log.Printf("[DB] Config activated: token_id=%s, agent_type=%s, deactivated_old=%v", tokenID, activated.AgentType, deactivated != nil)
 	return activated, deactivated, nil
 }
@@ -397,14 +401,17 @@ func (db *DB) DeactivateTokenConfig(tokenID string) (*model.TokenConfig, error) 
 func (db *DB) RecordUsage(tokenID, agentType string, latencyMs int64, inputTokens, outputTokens int) error {
 	log.Printf("[DB] Recording usage: token_id=%s, agent=%s, latency=%dms, input=%d, output=%d",
 		tokenID, agentType, latencyMs, inputTokens, outputTokens)
+	now := time.Now()
 	_, err := db.Exec(
 		"INSERT INTO usage (id, token_id, agent_type, input_tokens, output_tokens, latency_ms, model, request_path, created_at, created_at_ts) VALUES (?, ?, ?, ?, ?, ?, '', '', ?, ?)",
-		uuid.New().String(), tokenID, agentType, inputTokens, outputTokens, latencyMs, time.Now(), time.Now().UnixMilli(),
+		uuid.New().String(), tokenID, agentType, inputTokens, outputTokens, latencyMs, now, now.UnixMilli(),
 	)
 	if err != nil {
 		log.Printf("[DB] Record usage failed: %v", err)
+		return err
 	}
-	return err
+	db.Exec("UPDATE token_config SET last_used_at = ? WHERE id = ?", now.UnixMilli(), tokenID)
+	return nil
 }
 
 func (db *DB) GetUsages(tokenID string, days int) ([]*model.Usage, error) {
@@ -537,7 +544,7 @@ func (db *DB) FindConfigByURLAndKey(url, apiKey, agentType string) (*model.Token
 	c := &model.TokenConfig{}
 	var isActive int
 	query := `
-		SELECT tc.id, tc.name, tc.url, tc.api_key, tc.model, tc.agent_type, tc.is_active, tc.created_at, tc.updated_at
+		SELECT tc.id, tc.name, tc.url, tc.api_key, tc.model, tc.agent_type, tc.is_active, tc.last_used_at, tc.created_at, tc.updated_at
 		FROM token_config tc
 		LEFT JOIN (
 			SELECT token_id, MAX(created_at_ts) AS last_used FROM usage GROUP BY token_id
@@ -552,7 +559,7 @@ func (db *DB) FindConfigByURLAndKey(url, apiKey, agentType string) (*model.Token
 
 	query += ` ORDER BY COALESCE(u.last_used, 0) DESC, tc.updated_at DESC LIMIT 1`
 
-	err := db.QueryRow(query, args...).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.CreatedAt, &c.UpdatedAt)
+	err := db.QueryRow(query, args...).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -565,7 +572,7 @@ func (db *DB) FindMostRecentlyUsedConfig(agentType string) (*model.TokenConfig, 
 	c := &model.TokenConfig{}
 	var isActive int
 	query := `
-		SELECT tc.id, tc.name, tc.url, tc.api_key, tc.model, tc.agent_type, tc.is_active, tc.created_at, tc.updated_at
+		SELECT tc.id, tc.name, tc.url, tc.api_key, tc.model, tc.agent_type, tc.is_active, tc.last_used_at, tc.created_at, tc.updated_at
 		FROM token_config tc
 		LEFT JOIN (
 			SELECT token_id, MAX(created_at_ts) AS last_used FROM usage GROUP BY token_id
@@ -579,7 +586,7 @@ func (db *DB) FindMostRecentlyUsedConfig(agentType string) (*model.TokenConfig, 
 
 	query += ` ORDER BY COALESCE(u.last_used, 0) DESC, tc.updated_at DESC LIMIT 1`
 
-	err := db.QueryRow(query, args...).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.CreatedAt, &c.UpdatedAt)
+	err := db.QueryRow(query, args...).Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Model, &c.AgentType, &isActive, &c.LastUsedAt, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

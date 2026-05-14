@@ -3,15 +3,16 @@ package model
 import "time"
 
 type TokenConfig struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url"`
-	APIKey    string    `json:"api_key"`
-	Model     string    `json:"model"`
-	AgentType string    `json:"agent_type"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	URL        string    `json:"url"`
+	APIKey     string    `json:"api_key"`
+	Model      string    `json:"model"`
+	AgentType  string    `json:"agent_type"`
+	IsActive   bool      `json:"is_active"`
+	LastUsedAt int64     `json:"last_used_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 func (c *TokenConfig) MaskedAPIKey() string {

@@ -28,6 +28,8 @@ import (
 	"token_gate/internal/util"
 )
 
+var buildID = "dev"
+
 func main() {
 	cmd := "start"
 	if len(os.Args) > 1 {
@@ -306,7 +308,7 @@ func startServers() {
 	eventBus := event.NewEventBus()
 
 	proxyHandler := proxy.NewProxy(cache, db, latencyCache, eventBus)
-	apiHandler := api.NewAPI(db, cache, processors, latencyCache, companyMgr, eventBus)
+	apiHandler := api.NewAPI(db, cache, processors, latencyCache, companyMgr, eventBus, buildID)
 
 	proxyServer := &http.Server{Addr: "127.0.0.1:12121", Handler: proxyHandler}
 	apiServer := &http.Server{Addr: "127.0.0.1:12122", Handler: apiHandler.Routes()}

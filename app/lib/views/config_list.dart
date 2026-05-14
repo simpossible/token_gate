@@ -4,6 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/token_config.dart';
 import '../providers/providers.dart';
 
+int _parseCreatedTs(String createdAt) {
+  try {
+    return DateTime.parse(createdAt).millisecondsSinceEpoch;
+  } catch (_) {
+    return 0;
+  }
+}
+
 class ConfigList extends ConsumerWidget {
   final VoidCallback onCreateTap;
 
@@ -32,11 +40,13 @@ class ConfigList extends ConsumerWidget {
             return _EmptyState(onCreateTap: onCreateTap);
           }
 
-          // active configs first, then sorted by id descending
+          // active configs first, then by last_used_at (fallback to created_at) descending
           final sorted = [...configs]..sort((a, b) {
               if (a.isActive && !b.isActive) return -1;
               if (!a.isActive && b.isActive) return 1;
-              return b.id.compareTo(a.id);
+              final aTime = a.lastUsedAt > 0 ? a.lastUsedAt : _parseCreatedTs(a.createdAt);
+              final bTime = b.lastUsedAt > 0 ? b.lastUsedAt : _parseCreatedTs(b.createdAt);
+              return bTime.compareTo(aTime);
             });
 
           return ListView.builder(

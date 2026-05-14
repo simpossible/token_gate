@@ -6,6 +6,7 @@ class TokenConfig {
   final String model;
   final String agentType;
   final bool isActive;
+  final int lastUsedAt;
   final String createdAt;
 
   const TokenConfig({
@@ -16,6 +17,7 @@ class TokenConfig {
     required this.model,
     required this.agentType,
     required this.isActive,
+    required this.lastUsedAt,
     required this.createdAt,
   });
 
@@ -28,6 +30,7 @@ class TokenConfig {
       model: json['model'] as String? ?? '',
       agentType: json['agent_type'] as String? ?? '',
       isActive: json['is_active'] as bool? ?? false,
+      lastUsedAt: json['last_used_at'] as int? ?? 0,
       createdAt: json['created_at']?.toString() ?? '',
     );
   }
@@ -48,6 +51,7 @@ class TokenConfig {
     String? model,
     String? agentType,
     bool? isActive,
+    int? lastUsedAt,
     String? createdAt,
   }) {
     return TokenConfig(
@@ -58,6 +62,7 @@ class TokenConfig {
       model: model ?? this.model,
       agentType: agentType ?? this.agentType,
       isActive: isActive ?? this.isActive,
+      lastUsedAt: lastUsedAt ?? this.lastUsedAt,
       createdAt: createdAt ?? this.createdAt,
     );
   }

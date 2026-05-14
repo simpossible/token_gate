@@ -6,7 +6,10 @@
       "request": "launch",
       "type": "dart",
       "program": "lib/main.dart",
-      "args": ["--dart-define=FLUTTER_ENV=debug"]
+      "args": ["--dart-define=FLUTTER_ENV=debug"],
+      "env": {
+        "PATH": "/Users/tt/.rvm/gems/ruby-3.3.0/bin:/Users/tt/.rvm/gems/ruby-3.3.0@global/bin:/Users/tt/.rvm/rubies/ruby-3.3.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      }
     },
     {
       "name": "TokenGate (macOS profile)",

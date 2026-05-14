@@ -107,6 +107,20 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
     _subscribeEvents();
   }
 
+  @override
+  void didUpdateWidget(covariant ConfigDetail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final newId = widget.config.id;
+    if (oldWidget.config.id != newId) {
+      _eventSubscription?.cancel();
+      final oldId = oldWidget.config.id;
+      ref.read(eventServiceProvider).disconnect('event_$oldId');
+      _subscribeEvents();
+      ref.invalidate(usageStatsProvider(newId));
+      ref.invalidate(usagesProvider(newId));
+    }
+  }
+
   void _subscribeEvents() {
     final eventService = ref.read(eventServiceProvider);
     final log = ref.read(logServiceProvider);
