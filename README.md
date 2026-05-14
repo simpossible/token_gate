@@ -9,15 +9,15 @@
 - **多 API Key 管理** — 存储来自 Anthropic、智谱、DeepSeek、Kimi 等供应商的密钥
 - **实时切换** — 会话中途切换供应商或模型，下一个请求即时生效，无须新开会话
 - **Token 用量可视化** — 查看每个配置的请求数、输入/输出 Token 数量和时延趋势
-- **实时日志** — 逐行查看代理转发的请求和响应内容
+- **实时调试** — Network 调试面板（Debug Inspector），Chrome DevTools 风格的请求检查器，支持 Header/Payload/Response 查看、独立搜索导航、Raw Log 实时流
 - **状态栏显示** — macOS 菜单栏实时显示 Token 消耗
 
 ## 截图
 
 <img width="800" alt="主界面" src="docs/home.jpg" />
 
-### 实时日志
-<img width="800" alt="实时日志" src="docs/log.jpg" />
+### 实时调试
+<img width="800" alt="实时调试" src="docs/debug.jpg" />
 
 ## 安装
 
