@@ -83,6 +83,7 @@ class ConfigDetail extends ConsumerStatefulWidget {
   final VoidCallback onEdit;
   final VoidCallback onDeleted;
   final VoidCallback? onShowLog;
+  final VoidCallback? onOpenDebug;
 
   const ConfigDetail({
     super.key,
@@ -90,6 +91,7 @@ class ConfigDetail extends ConsumerStatefulWidget {
     required this.onEdit,
     required this.onDeleted,
     this.onShowLog,
+    this.onOpenDebug,
   });
 
   @override
@@ -199,6 +201,12 @@ class _ConfigDetailState extends ConsumerState<ConfigDetail> {
                   ],
                 ),
               ),
+              if (widget.onOpenDebug != null)
+                IconButton(
+                  icon: const Icon(Icons.bug_report_outlined, size: 18),
+                  tooltip: '调试',
+                  onPressed: widget.onOpenDebug,
+                ),
               IconButton(
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 tooltip: '编辑',

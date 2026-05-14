@@ -26,6 +26,54 @@ type Proxy struct {
 	debug        *debugLogger
 }
 
+type debugKind string
+
+const (
+	debugRequestStart   debugKind = "request_start"
+	debugRequestHeaders debugKind = "request_headers"
+	debugRequestBody    debugKind = "request_body"
+	debugResponseHeaders debugKind = "response_headers"
+	debugResponseChunk  debugKind = "response_chunk"
+	debugRequestEnd     debugKind = "request_end"
+)
+
+type gateDebugPayload struct {
+	ReqID string    `json:"req_id"`
+	Kind  debugKind `json:"kind"`
+	TsMs  int64     `json:"ts_ms"`
+
+	Method    string `json:"method,omitempty"`
+	Path      string `json:"path,omitempty"`
+	TargetURL string `json:"target_url,omitempty"`
+	AgentType string `json:"agent_type,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Status    int    `json:"status,omitempty"`
+
+	RequestHeaders  map[string][]string `json:"request_headers,omitempty"`
+	ResponseHeaders map[string][]string `json:"response_headers,omitempty"`
+
+	Body  string `json:"body,omitempty"`
+	Chunk string `json:"chunk,omitempty"`
+
+	LatencyMs int64 `json:"latency_ms,omitempty"`
+	TTFBMs    int64 `json:"ttfb_ms,omitempty"`
+	Usage     *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage,omitempty"`
+}
+
+func (p *Proxy) publishDebug(configID string, payload gateDebugPayload) {
+	if p.eventBus.HasSubscribers("log", configID) {
+		p.eventBus.Publish(event.Event{
+			ConnType: "log",
+			Type:     "gate_debug",
+			ConfigID: configID,
+			Payload:  payload,
+		})
+	}
+}
+
 func NewProxy(cache *config.ActiveConfigCache, db *database.DB, latencyCache *latency.Cache, eventBus *event.EventBus) *Proxy {
 	return &Proxy{cache: cache, db: db, latencyCache: latencyCache, eventBus: eventBus, debug: newDebugLogger()}
 }
@@ -39,6 +87,14 @@ func (p *Proxy) publishLog(configID string, msg string) {
 			Payload:  map[string]string{"message": msg},
 		})
 	}
+}
+
+func headersToMap(h http.Header) map[string][]string {
+	m := make(map[string][]string, len(h))
+	for k, vs := range h {
+		m[k] = append([]string(nil), vs...)
+	}
+	return m
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -103,16 +159,37 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[PROXY] forwarding to: %s", targetURL)
 
+	// Publish gate_debug: request start + headers
+	p.publishDebug(tc.ID, gateDebugPayload{
+		ReqID:     reqID,
+		Kind:      debugRequestStart,
+		TsMs:      time.Now().UnixMilli(),
+		Method:    r.Method,
+		Path:      realPath,
+		TargetURL: targetURL,
+		AgentType: agentType,
+		Model:     tc.Model,
+	})
+
 	// Publish gate_log: request summary + body
 	if p.eventBus.HasSubscribers("log", tc.ID) {
 		msg := fmt.Sprintf("%s → %s %s model=%s (%d bytes)", time.Now().Format("15:04:05"), r.Method, realPath, tc.Model, len(bodyBytes))
 		p.publishLog(tc.ID, msg)
+	}
 
-		if len(bodyBytes) > 0 {
-			var pretty bytes.Buffer
-			if json.Indent(&pretty, bodyBytes, "", "  ") == nil {
+	// Publish gate_debug: request body
+	if len(bodyBytes) > 0 {
+		var pretty bytes.Buffer
+		if json.Indent(&pretty, bodyBytes, "", "  ") == nil {
+			if p.eventBus.HasSubscribers("log", tc.ID) {
 				p.publishLog(tc.ID, pretty.String())
 			}
+			p.publishDebug(tc.ID, gateDebugPayload{
+				ReqID: reqID,
+				Kind:  debugRequestBody,
+				TsMs:  time.Now().UnixMilli(),
+				Body:  pretty.String(),
+			})
 		}
 	}
 
@@ -141,6 +218,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	p.debug.logRequest(reqID, agentType, r.Method, targetURL, origHeaders, fwdReq.Header, bodyBytes)
 
+	p.publishDebug(tc.ID, gateDebugPayload{
+		ReqID:           reqID,
+		Kind:            debugRequestHeaders,
+		TsMs:            time.Now().UnixMilli(),
+		RequestHeaders:  headersToMap(origHeaders),
+		ResponseHeaders: headersToMap(fwdReq.Header),
+	})
+
 	client := p.newHTTPClient()
 	resp, err := client.Do(fwdReq)
 	if err != nil {
@@ -152,6 +237,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[PROXY] response status: %d, content-type: %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	p.debug.logResponse(reqID, resp.StatusCode, resp.Header)
+
+	p.publishDebug(tc.ID, gateDebugPayload{
+		ReqID:           reqID,
+		Kind:            debugResponseHeaders,
+		TsMs:            time.Now().UnixMilli(),
+		Status:          resp.StatusCode,
+		ResponseHeaders: headersToMap(resp.Header),
+	})
 
 	// Copy response headers
 	for k, vs := range resp.Header {
@@ -165,7 +258,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
 	if isSSE {
 		log.Printf("[PROXY] streaming SSE response")
-		p.streamSSE(w, resp, tc.ID, agentType, reqID, start)
+		p.streamSSE(w, resp, tc.ID, agentType, reqID, start, realPath, targetURL, r.Method, tc.Model)
 	} else {
 		body, _ := io.ReadAll(resp.Body)
 		w.Write(body)
@@ -187,7 +280,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, agentType, reqID string, start time.Time) {
+func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, agentType, reqID string, start time.Time, path, targetURL, method, model string) {
 	flusher, canFlush := w.(http.Flusher)
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -216,6 +309,12 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 			data := strings.TrimPrefix(line, "data: ")
 			if data != "[DONE]" {
 				p.publishLog(tokenID, data)
+					p.publishDebug(tokenID, gateDebugPayload{
+						ReqID: reqID,
+						Kind:  debugResponseChunk,
+						TsMs:  time.Now().UnixMilli(),
+						Chunk: data,
+					})
 			}
 		}
 
@@ -265,6 +364,22 @@ func (p *Proxy) streamSSE(w http.ResponseWriter, resp *http.Response, tokenID, a
 		msg := fmt.Sprintf("%s ← ↑%d ↓%d %dms streaming", time.Now().Format("15:04:05"), lastUsageInput, lastUsageOutput, ttfbMs)
 		p.publishLog(tokenID, msg)
 	}
+
+		p.publishDebug(tokenID, gateDebugPayload{
+			ReqID:     reqID,
+			Kind:      debugRequestEnd,
+			TsMs:      time.Now().UnixMilli(),
+			Method:    method,
+			Path:      path,
+			TargetURL: targetURL,
+			AgentType: agentType,
+			Model:     model,
+			TTFBMs:    ttfbMs,
+			Usage: &struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			}{InputTokens: lastUsageInput, OutputTokens: lastUsageOutput},
+		})
 
 	log.Printf("[PROXY] SSE stream complete: agent=%s, ttfb=%dms, input=%d, output=%d", agentType, ttfbMs, lastUsageInput, lastUsageOutput)
 	p.debug.logSSEEnd(reqID)

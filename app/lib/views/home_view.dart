@@ -13,6 +13,7 @@ import '../services/log_service.dart';
 import 'config_detail.dart';
 import 'config_form.dart';
 import 'config_list.dart';
+import 'debug_inspector_overlay.dart';
 import 'log_panel.dart';
 import 'proxy_panel.dart';
 
@@ -31,6 +32,9 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
   String? _logPanelConfigId;
   String? _logPanelConfigName;
   bool _showProxyPanel = false;
+  bool _showDebugInspector = false;
+  String? _debugConfigId;
+  String? _debugConfigName;
   Timer? _updateCheckTimer;
 
   @override
@@ -194,6 +198,13 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
                                   _logPanelConfigName = selectedConfig.name;
                                 });
                               },
+                              onOpenDebug: () {
+                                setState(() {
+                                  _showDebugInspector = true;
+                                  _debugConfigId = selectedConfig.id;
+                                  _debugConfigName = selectedConfig.name;
+                                });
+                              },
                             )
                           : _EmptyDetail(onCreateTap: _openCreate),
                     ),
@@ -233,6 +244,26 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
               bottom: 0,
               child: ProxyPanel(
                 onClose: () => setState(() => _showProxyPanel = false),
+              ),
+            ),
+
+          // Debug inspector overlay (covers ConfigDetail area)
+          if (_showDebugInspector && _debugConfigId != null)
+            Positioned(
+              top: 52,
+              left: 220,
+              right: 0,
+              bottom: 0,
+              child: DebugInspectorOverlay(
+                configId: _debugConfigId!,
+                configName: _debugConfigName ?? '',
+                onClose: () {
+                  setState(() {
+                    _showDebugInspector = false;
+                    _debugConfigId = null;
+                    _debugConfigName = null;
+                  });
+                },
               ),
             ),
 
