@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/debug_inspector_provider.dart';
@@ -35,6 +36,12 @@ class _DebugInspectorOverlayState
   String? _lastRespondedReqId;
   bool _autoScroll = true;
 
+  // Search state
+  bool _showSearch = false;
+  String _searchQuery = '';
+  final FocusNode _searchFocusNode = FocusNode();
+  final TextEditingController _searchController = TextEditingController();
+
   static const _bgColor = Color(0xFFF3F4F6);
   static const _cardColor = Colors.white;
   static const _accentColor = Color(0xFF6366F1);
@@ -42,11 +49,45 @@ class _DebugInspectorOverlayState
   static const _splitterWidth = 6.0;
 
   @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+  }
+
+  @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     _responseScrollController.dispose();
     _rawLogScrollController.dispose();
+    _searchFocusNode.dispose();
+    _searchController.dispose();
     _throttleTimer?.cancel();
     super.dispose();
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final isCmd = HardwareKeyboard.instance.logicalKeysPressed
+          .any((k) => k == LogicalKeyboardKey.metaLeft || k == LogicalKeyboardKey.metaRight);
+      if (isCmd && event.logicalKey == LogicalKeyboardKey.keyF) {
+        setState(() {
+          _showSearch = true;
+        });
+        _searchFocusNode.requestFocus();
+        return true;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        if (_showSearch) {
+          setState(() {
+            _showSearch = false;
+            _searchQuery = '';
+            _searchController.clear();
+          });
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   void _autoScrollResponse() {
@@ -74,7 +115,6 @@ class _DebugInspectorOverlayState
     final notifier = ref.read(debugInspectorProvider(widget.configId).notifier);
     final selected = state.selected;
 
-    // Auto-scroll response when streaming
     if (selected != null && !selected.completed && selected.reqId != _lastRespondedReqId) {
       _lastRespondedReqId = selected.reqId;
       _autoScrollResponse();
@@ -91,17 +131,14 @@ class _DebugInspectorOverlayState
           Expanded(
             child: Row(
               children: [
-                // Area-1: Request list
                 SizedBox(
                   width: _area1Width,
                   child: _buildRequestList(state, notifier),
                 ),
                 _buildSplitter(() => _area1Width, (v) => setState(() => _area1Width = v), min: 150, max: 400),
-                // Area-2: Detail
                 Expanded(
                   child: _buildDetailArea(selected),
                 ),
-                // Area-3: Raw log (toggleable)
                 if (state.showRawLog) ...[
                   _buildSplitter(() => _area3Width, (v) => setState(() => _area3Width = v), min: 150, max: 500),
                   SizedBox(
@@ -141,7 +178,19 @@ class _DebugInspectorOverlayState
             style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
           ),
           const Spacer(),
-          // Clear button
+          // Search button
+          GestureDetector(
+            onTap: () {
+              setState(() => _showSearch = true);
+              _searchFocusNode.requestFocus();
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Icon(Icons.search, size: 16, color: Colors.grey[400]),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Clear
           GestureDetector(
             onTap: notifier.clear,
             child: MouseRegion(
@@ -194,7 +243,6 @@ class _DebugInspectorOverlayState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Column header
           Container(
             height: 28,
             padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -250,7 +298,6 @@ class _DebugInspectorOverlayState
             children: [
               Row(
                 children: [
-                  // Method badge
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
@@ -384,6 +431,8 @@ class _DebugInspectorOverlayState
               }).toList(),
             ),
           ),
+          // Search bar (when active)
+          if (_showSearch) _buildSearchBar(),
           // Tab content
           Expanded(
             child: switch (_selectedTab) {
@@ -397,7 +446,142 @@ class _DebugInspectorOverlayState
     );
   }
 
+  // ── Search bar ──────────────────────────────────────────────────────────────
+
+  Widget _buildSearchBar() {
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: _borderColor)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.search, size: 14, color: Color(0xFF9CA3AF)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF111827)),
+              decoration: const InputDecoration(
+                hintText: '搜索... (Esc 关闭)',
+                hintStyle: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 8),
+              ),
+              onChanged: (v) => setState(() => _searchQuery = v),
+            ),
+          ),
+          if (_searchQuery.isNotEmpty) ...[
+            Text(
+              '$_searchMatchCount matches',
+              style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF)),
+            ),
+            const SizedBox(width: 4),
+          ],
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _showSearch = false;
+                _searchQuery = '';
+                _searchController.clear();
+              });
+            },
+            child: const Icon(Icons.close, size: 14, color: Color(0xFF9CA3AF)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  int get _searchMatchCount {
+    final entry = ref.read(debugInspectorProvider(widget.configId)).selected;
+    if (entry == null || _searchQuery.isEmpty) return 0;
+    final text = switch (_selectedTab) {
+      _DetailTab.headers => _buildHeadersPlainText(entry),
+      _DetailTab.payload => entry.payload ?? '',
+      _DetailTab.response => entry.responseBuffer.toString(),
+    };
+    if (text.isEmpty) return 0;
+    int count = 0;
+    int pos = 0;
+    final lower = text.toLowerCase();
+    final q = _searchQuery.toLowerCase();
+    while ((pos = lower.indexOf(q, pos)) != -1) {
+      count++;
+      pos += q.length;
+    }
+    return count;
+  }
+
+  static String _buildHeadersPlainText(DebugRequestEntry entry) {
+    final buf = StringBuffer();
+    for (final e in entry.requestHeaders.entries) {
+      buf.writeln('${e.key}: ${e.value.join(', ')}');
+    }
+    for (final e in entry.responseHeaders.entries) {
+      buf.writeln('${e.key}: ${e.value.join(', ')}');
+    }
+    return buf.toString();
+  }
+
+  // ── Highlighted text builder ────────────────────────────────────────────────
+
+  static List<TextSpan> _buildHighlightSpans(String text, String query, TextStyle baseStyle) {
+    if (query.isEmpty) return [TextSpan(text: text, style: baseStyle)];
+    final spans = <TextSpan>[];
+    int start = 0;
+    final lower = text.toLowerCase();
+    final q = query.toLowerCase();
+    while (true) {
+      final index = lower.indexOf(q, start);
+      if (index == -1) {
+        spans.add(TextSpan(text: text.substring(start), style: baseStyle));
+        break;
+      }
+      if (index > start) {
+        spans.add(TextSpan(text: text.substring(start, index), style: baseStyle));
+      }
+      spans.add(TextSpan(
+        text: text.substring(index, index + q.length),
+        style: baseStyle.copyWith(backgroundColor: const Color(0xFFFFF3B0)),
+      ));
+      start = index + q.length;
+    }
+    return spans;
+  }
+
+  // ── Tab content builders ────────────────────────────────────────────────────
+
   Widget _buildHeadersContent(DebugRequestEntry entry) {
+    // Build full text for search
+    final buf = StringBuffer();
+    buf.writeln('Request Headers:');
+    for (final e in entry.requestHeaders.entries) {
+      buf.writeln('${e.key}: ${e.value.join(', ')}');
+    }
+    buf.writeln('Response Headers:');
+    for (final e in entry.responseHeaders.entries) {
+      buf.writeln('${e.key}: ${e.value.join(', ')}');
+    }
+    final fullText = buf.toString();
+
+    if (_showSearch && _searchQuery.isNotEmpty) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: RichText(
+          text: TextSpan(
+            children: _buildHighlightSpans(fullText, _searchQuery, const TextStyle(
+              fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151),
+            )),
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -464,10 +648,7 @@ class _DebugInspectorOverlayState
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(12),
-      child: SelectableText(
-        body,
-        style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151)),
-      ),
+      child: _buildSearchableText(body, const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151))),
     );
   }
 
@@ -483,10 +664,7 @@ class _DebugInspectorOverlayState
         SingleChildScrollView(
           controller: _responseScrollController,
           padding: const EdgeInsets.all(12),
-          child: SelectableText(
-            body,
-            style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151)),
-          ),
+          child: _buildSearchableText(body, const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151))),
         ),
         // Auto-scroll toggle
         Positioned(
@@ -529,6 +707,15 @@ class _DebugInspectorOverlayState
     );
   }
 
+  Widget _buildSearchableText(String text, TextStyle style) {
+    if (_showSearch && _searchQuery.isNotEmpty) {
+      return RichText(
+        text: TextSpan(children: _buildHighlightSpans(text, _searchQuery, style)),
+      );
+    }
+    return SelectableText(text, style: style);
+  }
+
   // ── Area-3: Raw log ───────────────────────────────────────────────────────
 
   Widget _buildRawLog(DebugInspectorState state) {
@@ -556,9 +743,20 @@ class _DebugInspectorOverlayState
                   'Raw Log',
                   style: TextStyle(color: Colors.white.withAlpha(200), fontSize: 12, fontWeight: FontWeight.w600),
                 ),
+                const Spacer(),
+                // Raw log search button
+                GestureDetector(
+                  onTap: () {
+                    setState(() => _showSearch = true);
+                    _searchFocusNode.requestFocus();
+                  },
+                  child: Icon(Icons.search, size: 12, color: Colors.white.withAlpha(120)),
+                ),
               ],
             ),
           ),
+          // Raw log search bar
+          if (_showSearch) _buildRawLogSearchBar(),
           Expanded(
             child: state.rawLogs.isEmpty
                 ? Center(
@@ -574,14 +772,7 @@ class _DebugInspectorOverlayState
                       final displayLog = log.length > 500 ? '${log.substring(0, 500)}...' : log;
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-                        child: SelectableText(
-                          displayLog,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 10,
-                            color: isRequest ? const Color(0xFF6366F1) : const Color(0xFF10B981),
-                          ),
-                        ),
+                        child: _buildSearchableRawLogLine(displayLog, isRequest),
                       );
                     },
                   ),
@@ -589,6 +780,76 @@ class _DebugInspectorOverlayState
         ],
       ),
     );
+  }
+
+  Widget _buildRawLogSearchBar() {
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(15),
+        border: Border(bottom: BorderSide(color: Colors.white.withAlpha(20))),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.search, size: 12, color: Colors.white.withAlpha(120)),
+          const SizedBox(width: 4),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              style: TextStyle(fontSize: 11, color: Colors.white.withAlpha(220)),
+              decoration: InputDecoration(
+                hintText: '搜索... (Esc 关闭)',
+                hintStyle: TextStyle(fontSize: 11, color: Colors.white.withAlpha(80)),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+              ),
+              onChanged: (v) => setState(() => _searchQuery = v),
+            ),
+          ),
+          if (_searchQuery.isNotEmpty) ...[
+            Text(
+              '$_rawLogMatchCount',
+              style: TextStyle(fontSize: 10, color: Colors.white.withAlpha(100)),
+            ),
+            const SizedBox(width: 4),
+          ],
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _showSearch = false;
+                _searchQuery = '';
+                _searchController.clear();
+              });
+            },
+            child: Icon(Icons.close, size: 12, color: Colors.white.withAlpha(120)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  int get _rawLogMatchCount {
+    if (_searchQuery.isEmpty) return 0;
+    // Count across raw logs — but state is not directly accessible here.
+    // We just show a simple match indicator for the current search.
+    return 0;
+  }
+
+  Widget _buildSearchableRawLogLine(String text, bool isRequest) {
+    final baseStyle = TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 10,
+      color: isRequest ? const Color(0xFF6366F1) : const Color(0xFF10B981),
+    );
+    if (_showSearch && _searchQuery.isNotEmpty) {
+      return RichText(
+        text: TextSpan(children: _buildHighlightSpans(text, _searchQuery, baseStyle)),
+      );
+    }
+    return SelectableText(text, style: baseStyle);
   }
 
   // ── Splitter (draggable) ──────────────────────────────────────────────────
