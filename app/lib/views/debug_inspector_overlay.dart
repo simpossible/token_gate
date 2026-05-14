@@ -8,6 +8,17 @@ import '../providers/debug_inspector_provider.dart';
 
 // ── Debug Inspector Overlay ──────────────────────────────────────────────────
 
+enum _SearchTarget { detail, rawLog }
+
+enum _DetailTab {
+  headers('Header'),
+  payload('Payload'),
+  response('Response');
+
+  final String label;
+  const _DetailTab(this.label);
+}
+
 class DebugInspectorOverlay extends ConsumerStatefulWidget {
   final String configId;
   final String configName;
@@ -30,17 +41,31 @@ class _DebugInspectorOverlayState
   double _area1Width = 240;
   double _area3Width = 280;
   _DetailTab _selectedTab = _DetailTab.headers;
-  final ScrollController _responseScrollController = ScrollController();
+  final ScrollController _detailScrollController = ScrollController();
   final ScrollController _rawLogScrollController = ScrollController();
   Timer? _throttleTimer;
   String? _lastRespondedReqId;
   bool _autoScroll = true;
 
-  // Search state
-  bool _showSearch = false;
-  String _searchQuery = '';
-  final FocusNode _searchFocusNode = FocusNode();
-  final TextEditingController _searchController = TextEditingController();
+  // Focus tracking for Cmd+F
+  _SearchTarget _searchTarget = _SearchTarget.detail;
+
+  // Detail search (independent)
+  bool _detailShowSearch = false;
+  String _detailSearchQuery = '';
+  final FocusNode _detailSearchFocusNode = FocusNode();
+  final TextEditingController _detailSearchController =
+      TextEditingController();
+  int _detailCurrentMatchIndex = 0;
+
+  // Raw log search (independent)
+  bool _rawLogShowSearch = false;
+  String _rawLogSearchQuery = '';
+  final FocusNode _rawLogSearchFocusNode = FocusNode();
+  final TextEditingController _rawLogSearchController =
+      TextEditingController();
+  int _rawLogCurrentMatchIndex = 0;
+  int _lastRawLogCount = 0;
 
   static const _bgColor = Color(0xFFF3F4F6);
   static const _cardColor = Colors.white;
@@ -57,57 +82,233 @@ class _DebugInspectorOverlayState
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
-    _responseScrollController.dispose();
+    _detailScrollController.dispose();
     _rawLogScrollController.dispose();
-    _searchFocusNode.dispose();
-    _searchController.dispose();
+    _detailSearchFocusNode.dispose();
+    _detailSearchController.dispose();
+    _rawLogSearchFocusNode.dispose();
+    _rawLogSearchController.dispose();
     _throttleTimer?.cancel();
     super.dispose();
   }
 
   bool _handleKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent) {
-      final isCmd = HardwareKeyboard.instance.logicalKeysPressed
-          .any((k) => k == LogicalKeyboardKey.metaLeft || k == LogicalKeyboardKey.metaRight);
-      if (isCmd && event.logicalKey == LogicalKeyboardKey.keyF) {
-        setState(() {
-          _showSearch = true;
-        });
-        _searchFocusNode.requestFocus();
-        return true;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.escape) {
-        if (_showSearch) {
-          setState(() {
-            _showSearch = false;
-            _searchQuery = '';
-            _searchController.clear();
-          });
-          return true;
-        }
-      }
+    if (event is! KeyDownEvent) return false;
+
+    final isCmd = HardwareKeyboard.instance.logicalKeysPressed.any(
+        (k) =>
+            k == LogicalKeyboardKey.metaLeft ||
+            k == LogicalKeyboardKey.metaRight);
+
+    // Enter in detail search -> navigate to next match
+    if (event.logicalKey == LogicalKeyboardKey.enter &&
+        _detailShowSearch &&
+        _detailSearchFocusNode.hasFocus) {
+      _advanceDetailMatch();
+      return true;
     }
+
+    // Enter in raw log search -> navigate to next match
+    if (event.logicalKey == LogicalKeyboardKey.enter &&
+        _rawLogShowSearch &&
+        _rawLogSearchFocusNode.hasFocus) {
+      _advanceRawLogMatch();
+      return true;
+    }
+
+    if (isCmd && event.logicalKey == LogicalKeyboardKey.keyF) {
+      if (_searchTarget == _SearchTarget.rawLog) {
+        setState(() => _rawLogShowSearch = true);
+        _rawLogSearchFocusNode.requestFocus();
+      } else {
+        setState(() => _detailShowSearch = true);
+        _detailSearchFocusNode.requestFocus();
+      }
+      return true;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      bool handled = false;
+      if (_rawLogShowSearch) {
+        setState(() {
+          _rawLogShowSearch = false;
+          _rawLogSearchQuery = '';
+          _rawLogCurrentMatchIndex = 0;
+          _rawLogSearchController.clear();
+        });
+        handled = true;
+      }
+      if (_detailShowSearch) {
+        setState(() {
+          _detailShowSearch = false;
+          _detailSearchQuery = '';
+          _detailCurrentMatchIndex = 0;
+          _detailSearchController.clear();
+        });
+        handled = true;
+      }
+      return handled;
+    }
+
     return false;
   }
+
+  // ── Detail search navigation ────────────────────────────────────────────────
+
+  String _currentDetailText() {
+    final entry =
+        ref.read(debugInspectorProvider(widget.configId)).selected;
+    if (entry == null) return '';
+    return switch (_selectedTab) {
+      _DetailTab.headers => _buildHeadersPlainText(entry),
+      _DetailTab.payload => entry.payload ?? '',
+      _DetailTab.response => entry.responseBuffer.toString(),
+    };
+  }
+
+  List<int> get _detailMatchPositions {
+    if (_detailSearchQuery.isEmpty) return [];
+    final text = _currentDetailText();
+    if (text.isEmpty) return [];
+    final positions = <int>[];
+    final lower = text.toLowerCase();
+    final q = _detailSearchQuery.toLowerCase();
+    int pos = 0;
+    while ((pos = lower.indexOf(q, pos)) != -1) {
+      positions.add(pos);
+      pos += q.length;
+    }
+    return positions;
+  }
+
+  int get _safeDetailCurrentMatchIndex {
+    final positions = _detailMatchPositions;
+    if (positions.isEmpty) return 0;
+    return _detailCurrentMatchIndex.clamp(0, positions.length - 1);
+  }
+
+  void _advanceDetailMatch() {
+    final positions = _detailMatchPositions;
+    if (positions.isEmpty) return;
+    setState(() {
+      _detailCurrentMatchIndex =
+          (_detailCurrentMatchIndex + 1) % positions.length;
+    });
+    _scrollToDetailMatch(positions[_detailCurrentMatchIndex]);
+  }
+
+  void _retreatDetailMatch() {
+    final positions = _detailMatchPositions;
+    if (positions.isEmpty) return;
+    setState(() {
+      _detailCurrentMatchIndex =
+          (_detailCurrentMatchIndex - 1 + positions.length) %
+              positions.length;
+    });
+    _scrollToDetailMatch(positions[_detailCurrentMatchIndex]);
+  }
+
+  void _scrollToDetailMatch(int charPosition) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_detailScrollController.hasClients) return;
+      final text = _currentDetailText();
+      if (text.isEmpty) return;
+      final ratio = charPosition / text.length;
+      final maxExtent = _detailScrollController.position.maxScrollExtent;
+      final viewportHeight =
+          _detailScrollController.position.viewportDimension;
+      final targetOffset = ratio * maxExtent - viewportHeight / 3;
+      _detailScrollController.animateTo(
+        targetOffset.clamp(0.0, maxExtent),
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  // ── Raw log search navigation ───────────────────────────────────────────────
+
+  List<int> get _rawLogMatchLineIndices {
+    if (_rawLogSearchQuery.isEmpty) return [];
+    final state = ref.read(debugInspectorProvider(widget.configId));
+    final q = _rawLogSearchQuery.toLowerCase();
+    return [
+      for (int i = 0; i < state.rawLogs.length; i++)
+        if (state.rawLogs[i].toLowerCase().contains(q)) i
+    ];
+  }
+
+  int get _safeRawLogCurrentMatchIndex {
+    final lines = _rawLogMatchLineIndices;
+    if (lines.isEmpty) return 0;
+    return _rawLogCurrentMatchIndex.clamp(0, lines.length - 1);
+  }
+
+  void _advanceRawLogMatch() {
+    final matchLines = _rawLogMatchLineIndices;
+    if (matchLines.isEmpty) return;
+    setState(() {
+      _rawLogCurrentMatchIndex =
+          (_rawLogCurrentMatchIndex + 1) % matchLines.length;
+    });
+    _scrollToRawLogLine(matchLines[_rawLogCurrentMatchIndex]);
+  }
+
+  void _retreatRawLogMatch() {
+    final matchLines = _rawLogMatchLineIndices;
+    if (matchLines.isEmpty) return;
+    setState(() {
+      _rawLogCurrentMatchIndex =
+          (_rawLogCurrentMatchIndex - 1 + matchLines.length) %
+              matchLines.length;
+    });
+    _scrollToRawLogLine(matchLines[_rawLogCurrentMatchIndex]);
+  }
+
+  void _scrollToRawLogLine(int lineIndex) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_rawLogScrollController.hasClients) return;
+      const itemHeight = 20.0;
+      const topPadding = 4.0;
+      final viewportHeight =
+          _rawLogScrollController.position.viewportDimension;
+      final targetOffset =
+          topPadding + lineIndex * itemHeight - viewportHeight / 3;
+      final maxExtent = _rawLogScrollController.position.maxScrollExtent;
+      _rawLogScrollController.animateTo(
+        targetOffset.clamp(0.0, maxExtent),
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  // ── Auto scroll ─────────────────────────────────────────────────────────────
 
   void _autoScrollResponse() {
     if (!_autoScroll) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_responseScrollController.hasClients) {
-        _responseScrollController
-            .jumpTo(_responseScrollController.position.maxScrollExtent);
+      if (_detailScrollController.hasClients) {
+        _detailScrollController
+            .jumpTo(_detailScrollController.position.maxScrollExtent);
       }
     });
   }
 
-  void _autoScrollRawLog() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_rawLogScrollController.hasClients) {
-        _rawLogScrollController
-            .jumpTo(_rawLogScrollController.position.maxScrollExtent);
-      }
-    });
+  void _maybeAutoScrollRawLog(int currentCount) {
+    if (_rawLogShowSearch && _rawLogSearchQuery.isNotEmpty) return;
+    if (currentCount > _lastRawLogCount) {
+      _lastRawLogCount = currentCount;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_rawLogScrollController.hasClients) {
+          _rawLogScrollController
+              .jumpTo(_rawLogScrollController.position.maxScrollExtent);
+        }
+      });
+    }
   }
+
+  // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -115,13 +316,17 @@ class _DebugInspectorOverlayState
     final notifier = ref.read(debugInspectorProvider(widget.configId).notifier);
     final selected = state.selected;
 
-    if (selected != null && !selected.completed && selected.reqId != _lastRespondedReqId) {
+    if (selected != null &&
+        !selected.completed &&
+        selected.reqId != _lastRespondedReqId) {
       _lastRespondedReqId = selected.reqId;
       _autoScrollResponse();
     }
     if (selected != null && !selected.completed) {
       _autoScrollResponse();
     }
+
+    _maybeAutoScrollRawLog(state.rawLogs.length);
 
     return Container(
       color: _bgColor,
@@ -135,15 +340,25 @@ class _DebugInspectorOverlayState
                   width: _area1Width,
                   child: _buildRequestList(state, notifier),
                 ),
-                _buildSplitter(() => _area1Width, (v) => setState(() => _area1Width = v), min: 150, max: 400),
+                _buildSplitter(() => _area1Width,
+                    (v) => setState(() => _area1Width = v),
+                    min: 150, max: 400),
                 Expanded(
-                  child: _buildDetailArea(selected),
+                  child: MouseRegion(
+                    onEnter: (_) => _searchTarget = _SearchTarget.detail,
+                    child: _buildDetailArea(selected),
+                  ),
                 ),
                 if (state.showRawLog) ...[
-                  _buildSplitter(() => _area3Width, (v) => setState(() => _area3Width = v), min: 150, max: 500),
+                  _buildSplitter(() => _area3Width,
+                      (v) => setState(() => _area3Width = v),
+                      min: 150, max: 500),
                   SizedBox(
                     width: _area3Width,
-                    child: _buildRawLog(state),
+                    child: MouseRegion(
+                      onEnter: (_) => _searchTarget = _SearchTarget.rawLog,
+                      child: _buildRawLog(state),
+                    ),
                   ),
                 ],
               ],
@@ -156,7 +371,8 @@ class _DebugInspectorOverlayState
 
   // ── Header ────────────────────────────────────────────────────────────────
 
-  Widget _buildHeader(DebugInspectorState state, DebugInspectorNotifier notifier) {
+  Widget _buildHeader(
+      DebugInspectorState state, DebugInspectorNotifier notifier) {
     return Container(
       height: 38,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -170,7 +386,10 @@ class _DebugInspectorOverlayState
           const SizedBox(width: 6),
           const Text(
             'Network',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF111827)),
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF111827)),
           ),
           const SizedBox(width: 8),
           Text(
@@ -178,11 +397,12 @@ class _DebugInspectorOverlayState
             style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
           ),
           const Spacer(),
-          // Search button
+          // Search button — opens detail search
           GestureDetector(
             onTap: () {
-              setState(() => _showSearch = true);
-              _searchFocusNode.requestFocus();
+              _searchTarget = _SearchTarget.detail;
+              setState(() => _detailShowSearch = true);
+              _detailSearchFocusNode.requestFocus();
             },
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
@@ -196,12 +416,15 @@ class _DebugInspectorOverlayState
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF3F4F6),
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: const Text('清空', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+                child: const Text('清空',
+                    style:
+                        TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
               ),
             ),
           ),
@@ -212,9 +435,12 @@ class _DebugInspectorOverlayState
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: Icon(
-                state.showRawLog ? Icons.article : Icons.article_outlined,
+                state.showRawLog
+                    ? Icons.article
+                    : Icons.article_outlined,
                 size: 16,
-                color: state.showRawLog ? _accentColor : const Color(0xFF9CA3AF),
+                color:
+                    state.showRawLog ? _accentColor : const Color(0xFF9CA3AF),
               ),
             ),
           ),
@@ -224,7 +450,8 @@ class _DebugInspectorOverlayState
             onTap: widget.onClose,
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
-              child: const Icon(Icons.close, size: 16, color: Color(0xFF9CA3AF)),
+              child:
+                  const Icon(Icons.close, size: 16, color: Color(0xFF9CA3AF)),
             ),
           ),
         ],
@@ -234,7 +461,8 @@ class _DebugInspectorOverlayState
 
   // ── Area-1: Request list ──────────────────────────────────────────────────
 
-  Widget _buildRequestList(DebugInspectorState state, DebugInspectorNotifier notifier) {
+  Widget _buildRequestList(
+      DebugInspectorState state, DebugInspectorNotifier notifier) {
     return Container(
       decoration: const BoxDecoration(
         color: _cardColor,
@@ -252,13 +480,19 @@ class _DebugInspectorOverlayState
             ),
             child: const Align(
               alignment: Alignment.centerLeft,
-              child: Text('请求列表', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w500)),
+              child: Text('请求列表',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF6B7280),
+                      fontWeight: FontWeight.w500)),
             ),
           ),
           Expanded(
             child: state.entries.isEmpty
                 ? const Center(
-                    child: Text('等待请求...', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                    child: Text('等待请求...',
+                        style:
+                            TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
                   )
                 : ListView.builder(
                     itemCount: state.entries.length,
@@ -274,7 +508,8 @@ class _DebugInspectorOverlayState
     );
   }
 
-  Widget _buildRequestItem(DebugRequestEntry entry, bool isSelected, DebugInspectorNotifier notifier) {
+  Widget _buildRequestItem(
+      DebugRequestEntry entry, bool isSelected, DebugInspectorNotifier notifier) {
     final statusColor = _statusColor(entry.status);
 
     return GestureDetector(
@@ -284,7 +519,9 @@ class _DebugInspectorOverlayState
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFF6366F1).withAlpha(20) : Colors.transparent,
+            color: isSelected
+                ? const Color(0xFF6366F1).withAlpha(20)
+                : Colors.transparent,
             border: Border(
               left: BorderSide(
                 color: isSelected ? _accentColor : Colors.transparent,
@@ -299,21 +536,26 @@ class _DebugInspectorOverlayState
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
                       color: const Color(0xFFF3F4F6),
                       borderRadius: BorderRadius.circular(3),
                     ),
                     child: Text(
                       entry.method,
-                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF6B7280)),
+                      style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6B7280)),
                     ),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       entry.path,
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF111827)),
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF111827)),
                       overflow: TextOverflow.ellipsis,
                       maxLines: 1,
                     ),
@@ -326,13 +568,17 @@ class _DebugInspectorOverlayState
                   if (entry.status != null)
                     Text(
                       '${entry.status}',
-                      style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: statusColor,
+                          fontWeight: FontWeight.w500),
                     ),
                   if (entry.latencyMs != null || entry.ttfbMs != null) ...[
                     const SizedBox(width: 6),
                     Text(
                       '${entry.latencyMs ?? entry.ttfbMs ?? 0}ms',
-                      style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF)),
+                      style: const TextStyle(
+                          fontSize: 10, color: Color(0xFF9CA3AF)),
                     ),
                   ],
                   if (!entry.completed) ...[
@@ -360,7 +606,8 @@ class _DebugInspectorOverlayState
   Widget _buildDetailArea(DebugRequestEntry? selected) {
     if (selected == null) {
       return const Center(
-        child: Text('选择一个请求查看详情', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+        child: Text('选择一个请求查看详情',
+            style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
       );
     }
 
@@ -380,14 +627,18 @@ class _DebugInspectorOverlayState
               children: [
                 Text(
                   '${selected.method} ${selected.path}',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Color(0xFF111827)),
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF111827)),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     selected.targetUrl,
-                    style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF)),
+                    style: const TextStyle(
+                        fontSize: 10, color: Color(0xFF9CA3AF)),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                   ),
@@ -398,7 +649,8 @@ class _DebugInspectorOverlayState
           // Tab bar
           Container(
             height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
             decoration: const BoxDecoration(
               border: Border(bottom: BorderSide(color: _borderColor)),
             ),
@@ -411,18 +663,24 @@ class _DebugInspectorOverlayState
                     onTap: () => setState(() => _selectedTab = tab),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 3),
                       decoration: BoxDecoration(
                         color: isActive ? Colors.white : Colors.transparent,
                         borderRadius: BorderRadius.circular(4),
-                        border: isActive ? Border.all(color: _borderColor) : null,
+                        border: isActive
+                            ? Border.all(color: _borderColor)
+                            : null,
                       ),
                       child: Text(
                         tab.label,
                         style: TextStyle(
                           fontSize: 12,
-                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-                          color: isActive ? const Color(0xFF111827) : const Color(0xFF9CA3AF),
+                          fontWeight:
+                              isActive ? FontWeight.w600 : FontWeight.w400,
+                          color: isActive
+                              ? const Color(0xFF111827)
+                              : const Color(0xFF9CA3AF),
                         ),
                       ),
                     ),
@@ -431,8 +689,8 @@ class _DebugInspectorOverlayState
               }).toList(),
             ),
           ),
-          // Search bar (when active)
-          if (_showSearch) _buildSearchBar(),
+          // Detail search bar
+          if (_detailShowSearch) _buildDetailSearchBar(),
           // Tab content
           Expanded(
             child: switch (_selectedTab) {
@@ -446,9 +704,13 @@ class _DebugInspectorOverlayState
     );
   }
 
-  // ── Search bar ──────────────────────────────────────────────────────────────
+  // ── Detail search bar ──────────────────────────────────────────────────────
 
-  Widget _buildSearchBar() {
+  Widget _buildDetailSearchBar() {
+    final positions = _detailMatchPositions;
+    final total = positions.length;
+    final current = total > 0 ? _safeDetailCurrentMatchIndex + 1 : 0;
+
     return Container(
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -462,32 +724,61 @@ class _DebugInspectorOverlayState
           const SizedBox(width: 6),
           Expanded(
             child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
+              controller: _detailSearchController,
+              focusNode: _detailSearchFocusNode,
               style: const TextStyle(fontSize: 12, color: Color(0xFF111827)),
               decoration: const InputDecoration(
-                hintText: '搜索... (Esc 关闭)',
+                hintText: '搜索... (Esc 关闭, Enter 下一个)',
                 hintStyle: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: EdgeInsets.symmetric(vertical: 8),
               ),
-              onChanged: (v) => setState(() => _searchQuery = v),
+              onChanged: (v) {
+                setState(() {
+                  _detailSearchQuery = v;
+                  _detailCurrentMatchIndex = 0;
+                });
+                final positions = _detailMatchPositions;
+                if (positions.isNotEmpty) {
+                  _scrollToDetailMatch(positions[0]);
+                }
+              },
             ),
           ),
-          if (_searchQuery.isNotEmpty) ...[
+          if (_detailSearchQuery.isNotEmpty) ...[
             Text(
-              '$_searchMatchCount matches',
-              style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF)),
+              '$current / $total',
+              style:
+                  const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF)),
+            ),
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: _retreatDetailMatch,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: const Icon(Icons.keyboard_arrow_up,
+                    size: 16, color: Color(0xFF9CA3AF)),
+              ),
+            ),
+            const SizedBox(width: 2),
+            GestureDetector(
+              onTap: _advanceDetailMatch,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: const Icon(Icons.keyboard_arrow_down,
+                    size: 16, color: Color(0xFF9CA3AF)),
+              ),
             ),
             const SizedBox(width: 4),
           ],
           GestureDetector(
             onTap: () {
               setState(() {
-                _showSearch = false;
-                _searchQuery = '';
-                _searchController.clear();
+                _detailShowSearch = false;
+                _detailSearchQuery = '';
+                _detailCurrentMatchIndex = 0;
+                _detailSearchController.clear();
               });
             },
             child: const Icon(Icons.close, size: 14, color: Color(0xFF9CA3AF)),
@@ -495,26 +786,6 @@ class _DebugInspectorOverlayState
         ],
       ),
     );
-  }
-
-  int get _searchMatchCount {
-    final entry = ref.read(debugInspectorProvider(widget.configId)).selected;
-    if (entry == null || _searchQuery.isEmpty) return 0;
-    final text = switch (_selectedTab) {
-      _DetailTab.headers => _buildHeadersPlainText(entry),
-      _DetailTab.payload => entry.payload ?? '',
-      _DetailTab.response => entry.responseBuffer.toString(),
-    };
-    if (text.isEmpty) return 0;
-    int count = 0;
-    int pos = 0;
-    final lower = text.toLowerCase();
-    final q = _searchQuery.toLowerCase();
-    while ((pos = lower.indexOf(q, pos)) != -1) {
-      count++;
-      pos += q.length;
-    }
-    return count;
   }
 
   static String _buildHeadersPlainText(DebugRequestEntry entry) {
@@ -530,7 +801,9 @@ class _DebugInspectorOverlayState
 
   // ── Highlighted text builder ────────────────────────────────────────────────
 
-  static List<TextSpan> _buildHighlightSpans(String text, String query, TextStyle baseStyle) {
+  static List<TextSpan> _buildHighlightSpans(
+      String text, String query, TextStyle baseStyle,
+      {int currentMatchOffset = -1}) {
     if (query.isEmpty) return [TextSpan(text: text, style: baseStyle)];
     final spans = <TextSpan>[];
     int start = 0;
@@ -543,11 +816,16 @@ class _DebugInspectorOverlayState
         break;
       }
       if (index > start) {
-        spans.add(TextSpan(text: text.substring(start, index), style: baseStyle));
+        spans.add(
+            TextSpan(text: text.substring(start, index), style: baseStyle));
       }
+      final isCurrent = index == currentMatchOffset;
       spans.add(TextSpan(
         text: text.substring(index, index + q.length),
-        style: baseStyle.copyWith(backgroundColor: const Color(0xFFFFF3B0)),
+        style: baseStyle.copyWith(
+            backgroundColor: isCurrent
+                ? const Color(0xFFFFA500)
+                : const Color(0xFFFFF3B0)),
       ));
       start = index + q.length;
     }
@@ -557,7 +835,6 @@ class _DebugInspectorOverlayState
   // ── Tab content builders ────────────────────────────────────────────────────
 
   Widget _buildHeadersContent(DebugRequestEntry entry) {
-    // Build full text for search
     final buf = StringBuffer();
     buf.writeln('Request Headers:');
     for (final e in entry.requestHeaders.entries) {
@@ -569,20 +846,30 @@ class _DebugInspectorOverlayState
     }
     final fullText = buf.toString();
 
-    if (_showSearch && _searchQuery.isNotEmpty) {
+    if (_detailShowSearch && _detailSearchQuery.isNotEmpty) {
+      final positions = _detailMatchPositions;
+      final currentOffset = positions.isNotEmpty
+          ? positions[_safeDetailCurrentMatchIndex]
+          : -1;
       return SingleChildScrollView(
+        controller: _detailScrollController,
         padding: const EdgeInsets.all(12),
         child: RichText(
           text: TextSpan(
-            children: _buildHighlightSpans(fullText, _searchQuery, const TextStyle(
-              fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151),
-            )),
+            children: _buildHighlightSpans(
+                fullText, _detailSearchQuery,
+                const TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Color(0xFF374151)),
+                currentMatchOffset: currentOffset),
           ),
         ),
       );
     }
 
     return SingleChildScrollView(
+      controller: _detailScrollController,
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -595,19 +882,24 @@ class _DebugInspectorOverlayState
     );
   }
 
-  Widget _buildHeaderSection(String title, Map<String, List<String>> headers) {
+  Widget _buildHeaderSection(
+      String title, Map<String, List<String>> headers) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF6B7280)),
+          style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6B7280)),
         ),
         const SizedBox(height: 6),
         if (headers.isEmpty)
           const Text('暂无', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)))
         else
-          ...headers.entries.map((e) => _buildHeaderRow(e.key, e.value.join(', '))),
+          ...headers.entries
+              .map((e) => _buildHeaderRow(e.key, e.value.join(', '))),
       ],
     );
   }
@@ -625,13 +917,19 @@ class _DebugInspectorOverlayState
             width: 180,
             child: Text(
               key,
-              style: const TextStyle(fontSize: 11, color: Color(0xFF6366F1), fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF6366F1),
+                  fontWeight: FontWeight.w500),
             ),
           ),
           Expanded(
             child: SelectableText(
               value,
-              style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151)),
+              style: const TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color: Color(0xFF374151)),
             ),
           ),
         ],
@@ -643,12 +941,15 @@ class _DebugInspectorOverlayState
     final body = entry.payload ?? '';
     if (body.isEmpty) {
       return const Center(
-        child: Text('无请求体', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+        child: Text('无请求体',
+            style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
       );
     }
     return SingleChildScrollView(
+      controller: _detailScrollController,
       padding: const EdgeInsets.all(12),
-      child: _buildSearchableText(body, const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151))),
+      child: _buildDetailSearchableText(body,
+          const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151))),
     );
   }
 
@@ -656,15 +957,17 @@ class _DebugInspectorOverlayState
     final body = entry.responseBuffer.toString();
     if (body.isEmpty) {
       return const Center(
-        child: Text('等待响应...', style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+        child: Text('等待响应...',
+            style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
       );
     }
     return Stack(
       children: [
         SingleChildScrollView(
-          controller: _responseScrollController,
+          controller: _detailScrollController,
           padding: const EdgeInsets.all(12),
-          child: _buildSearchableText(body, const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151))),
+          child: _buildDetailSearchableText(body,
+              const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF374151))),
         ),
         // Auto-scroll toggle
         Positioned(
@@ -675,7 +978,8 @@ class _DebugInspectorOverlayState
             child: MouseRegion(
               cursor: SystemMouseCursors.click,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.white.withAlpha(220),
                   borderRadius: BorderRadius.circular(4),
@@ -685,16 +989,21 @@ class _DebugInspectorOverlayState
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      _autoScroll ? Icons.vertical_align_bottom : Icons.vertical_align_bottom_outlined,
+                      _autoScroll
+                          ? Icons.vertical_align_bottom
+                          : Icons.vertical_align_bottom_outlined,
                       size: 12,
-                      color: _autoScroll ? _accentColor : const Color(0xFF9CA3AF),
+                      color:
+                          _autoScroll ? _accentColor : const Color(0xFF9CA3AF),
                     ),
                     const SizedBox(width: 3),
                     Text(
                       '自动滚动',
                       style: TextStyle(
                         fontSize: 10,
-                        color: _autoScroll ? _accentColor : const Color(0xFF9CA3AF),
+                        color: _autoScroll
+                            ? _accentColor
+                            : const Color(0xFF9CA3AF),
                       ),
                     ),
                   ],
@@ -707,10 +1016,17 @@ class _DebugInspectorOverlayState
     );
   }
 
-  Widget _buildSearchableText(String text, TextStyle style) {
-    if (_showSearch && _searchQuery.isNotEmpty) {
+  Widget _buildDetailSearchableText(String text, TextStyle style) {
+    if (_detailShowSearch && _detailSearchQuery.isNotEmpty) {
+      final positions = _detailMatchPositions;
+      final currentOffset = positions.isNotEmpty
+          ? positions[_safeDetailCurrentMatchIndex]
+          : -1;
       return RichText(
-        text: TextSpan(children: _buildHighlightSpans(text, _searchQuery, style)),
+        text: TextSpan(
+            children: _buildHighlightSpans(
+                text, _detailSearchQuery, style,
+                currentMatchOffset: currentOffset)),
       );
     }
     return SelectableText(text, style: style);
@@ -719,7 +1035,11 @@ class _DebugInspectorOverlayState
   // ── Area-3: Raw log ───────────────────────────────────────────────────────
 
   Widget _buildRawLog(DebugInspectorState state) {
-    _autoScrollRawLog();
+    final matchLines = _rawLogMatchLineIndices;
+    final currentMatchLine = matchLines.isNotEmpty
+        ? matchLines[_safeRawLogCurrentMatchIndex]
+        : -1;
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF1E1E2E),
@@ -733,7 +1053,8 @@ class _DebugInspectorOverlayState
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
               color: Colors.white.withAlpha(10),
-              border: Border(bottom: BorderSide(color: Colors.white.withAlpha(20))),
+              border:
+                  Border(bottom: BorderSide(color: Colors.white.withAlpha(20))),
             ),
             child: Row(
               children: [
@@ -741,41 +1062,63 @@ class _DebugInspectorOverlayState
                 const SizedBox(width: 6),
                 Text(
                   'Raw Log',
-                  style: TextStyle(color: Colors.white.withAlpha(200), fontSize: 12, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                      color: Colors.white.withAlpha(200),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 // Raw log search button
                 GestureDetector(
                   onTap: () {
-                    setState(() => _showSearch = true);
-                    _searchFocusNode.requestFocus();
+                    _searchTarget = _SearchTarget.rawLog;
+                    setState(() => _rawLogShowSearch = true);
+                    _rawLogSearchFocusNode.requestFocus();
                   },
-                  child: Icon(Icons.search, size: 12, color: Colors.white.withAlpha(120)),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Icon(Icons.search,
+                        size: 12, color: Colors.white.withAlpha(120)),
+                  ),
                 ),
               ],
             ),
           ),
           // Raw log search bar
-          if (_showSearch) _buildRawLogSearchBar(),
+          if (_rawLogShowSearch) _buildRawLogSearchBar(),
           Expanded(
-            child: state.rawLogs.isEmpty
-                ? Center(
-                    child: Text('等待日志...', style: TextStyle(color: Colors.white.withAlpha(80), fontSize: 12)),
-                  )
-                : ListView.builder(
-                    controller: _rawLogScrollController,
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    itemCount: state.rawLogs.length,
-                    itemBuilder: (ctx, i) {
-                      final log = state.rawLogs[i];
-                      final isRequest = log.contains('→');
-                      final displayLog = log.length > 500 ? '${log.substring(0, 500)}...' : log;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-                        child: _buildSearchableRawLogLine(displayLog, isRequest),
-                      );
-                    },
-                  ),
+            child: SelectionArea(
+              child: state.rawLogs.isEmpty
+                  ? Center(
+                      child: Text('等待日志...',
+                          style: TextStyle(
+                              color: Colors.white.withAlpha(80),
+                              fontSize: 12)),
+                    )
+                  : SingleChildScrollView(
+                      controller: _rawLogScrollController,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (int i = 0; i < state.rawLogs.length; i++)
+                            Container(
+                              color: i == currentMatchLine
+                                  ? const Color(0xFF3B3B5C)
+                                  : null,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 1),
+                              child: _buildSearchableRawLogLine(
+                                state.rawLogs[i].length > 500
+                                    ? '${state.rawLogs[i].substring(0, 500)}...'
+                                    : state.rawLogs[i],
+                                state.rawLogs[i].contains('→'),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+            ),
           ),
         ],
       ),
@@ -783,78 +1126,116 @@ class _DebugInspectorOverlayState
   }
 
   Widget _buildRawLogSearchBar() {
+    final matchLines = _rawLogMatchLineIndices;
+    final total = matchLines.length;
+    final current = total > 0 ? _safeRawLogCurrentMatchIndex + 1 : 0;
+
     return Container(
       height: 30,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: Colors.white.withAlpha(15),
-        border: Border(bottom: BorderSide(color: Colors.white.withAlpha(20))),
+        border:
+            Border(bottom: BorderSide(color: Colors.white.withAlpha(20))),
       ),
       child: Row(
         children: [
-          Icon(Icons.search, size: 12, color: Colors.white.withAlpha(120)),
+          Icon(Icons.search,
+              size: 12, color: Colors.white.withAlpha(120)),
           const SizedBox(width: 4),
           Expanded(
             child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              style: TextStyle(fontSize: 11, color: Colors.white.withAlpha(220)),
+              controller: _rawLogSearchController,
+              focusNode: _rawLogSearchFocusNode,
+              style: TextStyle(
+                  fontSize: 11, color: Colors.white.withAlpha(220)),
               decoration: InputDecoration(
-                hintText: '搜索... (Esc 关闭)',
-                hintStyle: TextStyle(fontSize: 11, color: Colors.white.withAlpha(80)),
+                hintText: '搜索... (Esc 关闭, Enter 下一个)',
+                hintStyle: TextStyle(
+                    fontSize: 11, color: Colors.white.withAlpha(80)),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 6),
               ),
-              onChanged: (v) => setState(() => _searchQuery = v),
+              onChanged: (v) {
+                setState(() {
+                  _rawLogSearchQuery = v;
+                  _rawLogCurrentMatchIndex = 0;
+                });
+                final lines = _rawLogMatchLineIndices;
+                if (lines.isNotEmpty) {
+                  _scrollToRawLogLine(lines[0]);
+                }
+              },
             ),
           ),
-          if (_searchQuery.isNotEmpty) ...[
+          if (_rawLogSearchQuery.isNotEmpty) ...[
             Text(
-              '$_rawLogMatchCount',
-              style: TextStyle(fontSize: 10, color: Colors.white.withAlpha(100)),
+              '$current / $total',
+              style: TextStyle(
+                  fontSize: 10, color: Colors.white.withAlpha(100)),
+            ),
+            const SizedBox(width: 6),
+            // Navigate buttons
+            GestureDetector(
+              onTap: _retreatRawLogMatch,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Icon(Icons.keyboard_arrow_up,
+                    size: 16, color: Colors.white.withAlpha(150)),
+              ),
+            ),
+            const SizedBox(width: 2),
+            GestureDetector(
+              onTap: _advanceRawLogMatch,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Icon(Icons.keyboard_arrow_down,
+                    size: 16, color: Colors.white.withAlpha(150)),
+              ),
             ),
             const SizedBox(width: 4),
           ],
           GestureDetector(
             onTap: () {
               setState(() {
-                _showSearch = false;
-                _searchQuery = '';
-                _searchController.clear();
+                _rawLogShowSearch = false;
+                _rawLogSearchQuery = '';
+                _rawLogCurrentMatchIndex = 0;
+                _rawLogSearchController.clear();
               });
             },
-            child: Icon(Icons.close, size: 12, color: Colors.white.withAlpha(120)),
+            child: Icon(Icons.close,
+                size: 12, color: Colors.white.withAlpha(120)),
           ),
         ],
       ),
     );
   }
 
-  int get _rawLogMatchCount {
-    if (_searchQuery.isEmpty) return 0;
-    // Count across raw logs — but state is not directly accessible here.
-    // We just show a simple match indicator for the current search.
-    return 0;
-  }
-
   Widget _buildSearchableRawLogLine(String text, bool isRequest) {
     final baseStyle = TextStyle(
       fontFamily: 'monospace',
       fontSize: 10,
-      color: isRequest ? const Color(0xFF6366F1) : const Color(0xFF10B981),
+      color: isRequest
+          ? const Color(0xFF6366F1)
+          : const Color(0xFF10B981),
     );
-    if (_showSearch && _searchQuery.isNotEmpty) {
-      return RichText(
-        text: TextSpan(children: _buildHighlightSpans(text, _searchQuery, baseStyle)),
+    if (_rawLogShowSearch && _rawLogSearchQuery.isNotEmpty) {
+      return Text.rich(
+        TextSpan(
+            children: _buildHighlightSpans(
+                text, _rawLogSearchQuery, baseStyle)),
       );
     }
-    return SelectableText(text, style: baseStyle);
+    return Text(text, style: baseStyle);
   }
 
   // ── Splitter (draggable) ──────────────────────────────────────────────────
 
-  Widget _buildSplitter(double Function() getWidth, ValueChanged<double> setWidth, {double min = 150, max = 400}) {
+  Widget _buildSplitter(double Function() getWidth,
+      ValueChanged<double> setWidth,
+      {double min = 150, max = 400}) {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
         final newWidth = getWidth() + details.delta.dx;
@@ -887,15 +1268,4 @@ class _DebugInspectorOverlayState
     if (status >= 500) return const Color(0xFFEF4444);
     return const Color(0xFF9CA3AF);
   }
-}
-
-// ── Tab enum ─────────────────────────────────────────────────────────────────
-
-enum _DetailTab {
-  headers('Header'),
-  payload('Payload'),
-  response('Response');
-
-  final String label;
-  const _DetailTab(this.label);
 }
