@@ -87,3 +87,9 @@ type DailyUsage struct {
 	Requests     int    `json:"requests"`
 	AgentType    string `json:"agent_type"`
 }
+
+type ProxyConfig struct {
+	Host    string `json:"host"`
+	Port    string `json:"port"`
+	Enabled bool   `json:"enabled"`
+}

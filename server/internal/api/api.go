@@ -45,6 +45,8 @@ func (a *API) Routes() http.Handler {
 	r.Get("/api/agents", a.listAgents)
 	r.Get("/api/version", a.getVersion)
 	r.Get("/api/companies", a.getCompanies)
+	r.Get("/api/proxy", a.getProxyConfig)
+	r.Put("/api/proxy", a.updateProxyConfig)
 	r.Get("/api/events", a.handleEvents)
 	r.Route("/api/configs/{id}", func(r chi.Router) {
 		r.Get("/", a.getConfig)
@@ -428,4 +430,35 @@ func (a *API) listAgents(w http.ResponseWriter, r *http.Request) {
 func (a *API) getCompanies(w http.ResponseWriter, r *http.Request) {
 	a.companyMgr.RefreshAsync()
 	writeJSON(w, http.StatusOK, a.companyMgr.Get())
+}
+
+func (a *API) getProxyConfig(w http.ResponseWriter, r *http.Request) {
+	cfg, err := a.db.GetProxyConfig()
+	if err != nil {
+		log.Printf("[API] get proxy config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
+
+func (a *API) updateProxyConfig(w http.ResponseWriter, r *http.Request) {
+	var req model.ProxyConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[API] update proxy config: invalid request body: %v", err)
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Enabled && (req.Host == "" || req.Port == "") {
+		log.Printf("[API] update proxy config: host and port required when enabled")
+		writeError(w, http.StatusBadRequest, "host and port are required when proxy is enabled")
+		return
+	}
+	if err := a.db.SetProxyConfig(&req); err != nil {
+		log.Printf("[API] update proxy config failed: %v", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Printf("[API] proxy config updated: host=%s, port=%s, enabled=%v", req.Host, req.Port, req.Enabled)
+	writeJSON(w, http.StatusOK, req)
 }

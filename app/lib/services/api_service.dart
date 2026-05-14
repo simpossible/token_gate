@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../models/agent.dart';
 import '../models/company.dart';
 import '../models/latency_entry.dart';
+import '../models/proxy_config.dart';
 import '../models/token_config.dart';
 import '../models/usage_entry.dart';
 import '../models/usage_stats.dart';
@@ -149,5 +150,16 @@ class ApiService {
     final json = await _get('/api/companies');
     final list = json['list'] as List<dynamic>? ?? [];
     return list.map((e) => Company.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  // Proxy config
+  Future<ProxyConfig> getProxyConfig() async {
+    final json = await _get('/api/proxy');
+    return ProxyConfig.fromJson(json);
+  }
+
+  Future<ProxyConfig> setProxyConfig(ProxyConfig config) async {
+    final json = await _put('/api/proxy', config.toJson());
+    return ProxyConfig.fromJson(json);
   }
 }

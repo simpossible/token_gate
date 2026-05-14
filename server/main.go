@@ -293,7 +293,7 @@ func startServers() {
 
 	latencyCache := latency.New()
 
-	companyMgr := company.NewManager(dir)
+	companyMgr := company.NewManager(dir, db)
 
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)

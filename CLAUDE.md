@@ -494,6 +494,46 @@ Configs are sorted by: active first → `last_used_at` DESC → `created_at` DES
 3. Calls `_subscribeEvents()` with new configId
 4. Invalidates `usageStatsProvider` and `usagesProvider` to fetch latest data
 
+## Proxy Settings
+
+Global HTTP proxy configuration for routing outgoing API requests through a proxy server.
+
+### Storage
+
+- `app_setting` table in SQLite (`~/.token_gate/token_gate.db`) — key-value store
+- Proxy config stored as JSON under key `proxy_config`: `{"host":"127.0.0.1","port":"7890","enabled":true}`
+- Read from DB per-request (no in-memory cache) — settings take effect immediately after save
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/proxy` | GET | Returns current proxy config `{"host":"","port":"","enabled":false}` |
+| `/api/proxy` | PUT | Updates proxy config, validates host+port when enabled |
+
+### How Proxy is Applied
+
+1. **Proxy handler** (`server/internal/proxy/proxy.go`): `newHTTPClient()` reads proxy config from DB on every request. When enabled, creates `http.Transport{Proxy: http.ProxyURL(proxyURL)}` where `proxyURL = "http://" + host + ":" + port`.
+2. **Company refresh** (`server/internal/company/company.go`): GitHub fetch also respects proxy settings via the same DB read pattern.
+
+### Flutter UI
+
+- "代理设置" menu item in the More popup menu (3rd item after 创建配置 and 查看日志)
+- `ProxyPanel` slides in as a `Positioned(top: 52, left: 220, right: 0, bottom: 0)` overlay in the Stack
+- Contains: enable/disable Switch, host + port TextFields, save button
+- Uses `proxyConfigProvider` (FutureProvider) for initial load, invalidates on save
+- Style matches ConfigDetail: white bg, indigo accent `0xFF6366F1`, border radius 10, `EdgeInsets.all(24)`
+
+### Key Files
+
+- `server/internal/model/model.go` — `ProxyConfig` struct (host, port, enabled)
+- `server/internal/database/database.go` — `app_setting` table, `GetProxyConfig`/`SetProxyConfig`
+- `server/internal/api/api.go` — `GET/PUT /api/proxy`
+- `server/internal/proxy/proxy.go` — `newHTTPClient()` with proxy transport
+- `server/internal/company/company.go` — proxy-aware `refresh()`
+- `app/lib/models/proxy_config.dart` — Flutter model
+- `app/lib/views/proxy_panel.dart` — Proxy settings panel UI
+
 ## Release Changelog
 
 ### v0.2.5

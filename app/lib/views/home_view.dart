@@ -14,6 +14,7 @@ import 'config_detail.dart';
 import 'config_form.dart';
 import 'config_list.dart';
 import 'log_panel.dart';
+import 'proxy_panel.dart';
 
 class HomeView extends ConsumerStatefulWidget {
   const HomeView({super.key});
@@ -29,6 +30,7 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
   bool _showLogPanel = false;
   String? _logPanelConfigId;
   String? _logPanelConfigName;
+  bool _showProxyPanel = false;
   Timer? _updateCheckTimer;
 
   @override
@@ -172,6 +174,7 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
                 },
                 onCreateTap: _openCreate,
                 onOpenLogs: _openLogDir,
+                onOpenProxy: () => setState(() => _showProxyPanel = true),
               ),
               Expanded(
                 child: Row(
@@ -221,6 +224,18 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
               ),
             ),
 
+          // Proxy panel overlay (covers ConfigDetail area)
+          if (_showProxyPanel)
+            Positioned(
+              top: 52,
+              left: 220,
+              right: 0,
+              bottom: 0,
+              child: ProxyPanel(
+                onClose: () => setState(() => _showProxyPanel = false),
+              ),
+            ),
+
           // ── Modal overlay for create / edit ─────────────────────────────
           if (_showForm) ...[
             GestureDetector(
@@ -253,6 +268,7 @@ class _TopBar extends ConsumerWidget {
   final ValueChanged<String> onAgentChanged;
   final VoidCallback onCreateTap;
   final VoidCallback onOpenLogs;
+  final VoidCallback onOpenProxy;
 
   const _TopBar({
     required this.agentsAsync,
@@ -260,6 +276,7 @@ class _TopBar extends ConsumerWidget {
     required this.onAgentChanged,
     required this.onCreateTap,
     required this.onOpenLogs,
+    required this.onOpenProxy,
   });
 
   @override
@@ -389,6 +406,8 @@ class _TopBar extends ConsumerWidget {
                   onCreateTap();
                 } else if (value == 'logs') {
                   onOpenLogs();
+                } else if (value == 'proxy') {
+                  onOpenProxy();
                 }
               },
               itemBuilder: (_) => [
@@ -411,6 +430,17 @@ class _TopBar extends ConsumerWidget {
                       Icon(Icons.folder_open, size: 16, color: Color(0xFF374151)),
                       SizedBox(width: 8),
                       Text('查看日志', style: TextStyle(fontSize: 13)),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'proxy',
+                  height: 32,
+                  child: Row(
+                    children: [
+                      Icon(Icons.vpn_lock, size: 16, color: Color(0xFF374151)),
+                      SizedBox(width: 8),
+                      Text('代理设置', style: TextStyle(fontSize: 13)),
                     ],
                   ),
                 ),

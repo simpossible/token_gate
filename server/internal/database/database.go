@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -53,6 +54,10 @@ func (db *DB) InitSchema() error {
 		model TEXT NOT NULL DEFAULT '',
 		request_path TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS app_setting (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
 	);
 	`
 	_, err := db.Exec(schema)
@@ -621,4 +626,43 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// --- App Settings ---
+
+func (db *DB) GetAppSetting(key string) (string, error) {
+	var value string
+	err := db.QueryRow("SELECT value FROM app_setting WHERE key = ?", key).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return value, err
+}
+
+func (db *DB) SetAppSetting(key, value string) error {
+	_, err := db.Exec(
+		"INSERT INTO app_setting (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+		key, value, value,
+	)
+	return err
+}
+
+func (db *DB) GetProxyConfig() (*model.ProxyConfig, error) {
+	raw, err := db.GetAppSetting("proxy_config")
+	if err != nil || raw == "" {
+		return &model.ProxyConfig{}, nil
+	}
+	var cfg model.ProxyConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return &model.ProxyConfig{}, nil
+	}
+	return &cfg, nil
+}
+
+func (db *DB) SetProxyConfig(cfg *model.ProxyConfig) error {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return db.SetAppSetting("proxy_config", string(data))
 }

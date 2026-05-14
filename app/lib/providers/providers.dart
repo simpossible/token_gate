@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/agent.dart';
 import '../models/company.dart';
 import '../models/latency_entry.dart';
+import '../models/proxy_config.dart';
 import '../models/token_config.dart';
 import '../models/usage_entry.dart';
 import '../models/usage_stats.dart';
@@ -104,4 +105,10 @@ final latencyProvider =
 final companiesProvider = FutureProvider<List<Company>>((ref) async {
   ref.keepAlive();
   return ref.read(apiServiceProvider).listCompanies();
+});
+
+// ── Proxy config ────────────────────────────────────────────────────────────
+
+final proxyConfigProvider = FutureProvider<ProxyConfig>((ref) async {
+  return ref.read(apiServiceProvider).getProxyConfig();
 });

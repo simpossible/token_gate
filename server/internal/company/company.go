@@ -6,10 +6,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"token_gate/internal/database"
 )
 
 //go:embed company.json
@@ -31,10 +34,11 @@ type Manager struct {
 	mu      sync.RWMutex
 	data    *CompanyList
 	dataDir string
+	db      *database.DB
 }
 
-func NewManager(dataDir string) *Manager {
-	m := &Manager{dataDir: dataDir}
+func NewManager(dataDir string, db *database.DB) *Manager {
+	m := &Manager{dataDir: dataDir, db: db}
 	m.load()
 	return m
 }
@@ -75,6 +79,16 @@ func (m *Manager) RefreshAsync() {
 
 func (m *Manager) refresh() {
 	client := &http.Client{Timeout: 15 * time.Second}
+
+	if m.db != nil {
+		cfg, err := m.db.GetProxyConfig()
+		if err == nil && cfg.Enabled && cfg.Host != "" && cfg.Port != "" {
+			if proxyURL, err := url.Parse("http://" + cfg.Host + ":" + cfg.Port); err == nil {
+				client.Transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+			}
+		}
+	}
+
 	resp, err := client.Get(githubRawURL)
 	if err != nil {
 		log.Printf("[COMPANY] refresh failed: %v", err)

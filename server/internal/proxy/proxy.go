@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -140,7 +141,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	p.debug.logRequest(reqID, agentType, r.Method, targetURL, origHeaders, fwdReq.Header, bodyBytes)
 
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := p.newHTTPClient()
 	resp, err := client.Do(fwdReq)
 	if err != nil {
 		log.Printf("[PROXY] forward request error: %v", err)
@@ -326,6 +327,18 @@ func (p *Proxy) publishUsageEvents(tokenID string, latencyMs int64, inputTokens,
 			},
 		})
 	}
+}
+
+func (p *Proxy) newHTTPClient() *http.Client {
+	client := &http.Client{Timeout: 5 * time.Minute}
+	cfg, err := p.db.GetProxyConfig()
+	if err == nil && cfg.Enabled && cfg.Host != "" && cfg.Port != "" {
+		proxyURL, err := url.Parse("http://" + cfg.Host + ":" + cfg.Port)
+		if err == nil {
+			client.Transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+		}
+	}
+	return client
 }
 
 func replaceModel(body []byte, model string) []byte {
