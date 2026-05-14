@@ -457,6 +457,55 @@ Reloaded every 5 minutes. Edit and save to update versions across all running in
 | `deviceIdProvider` | `FutureProvider<String>` | UUID persisted in shared_preferences |
 | `newVersionProvider` | `StateProvider<String?>` | null = no update, string = new version available |
 
+## Daemon BuildID Version Check
+
+When the app upgrades, the old Go daemon may still be running. Flutter now checks the daemon's buildID and restarts it if mismatched.
+
+**How it works:**
+1. Go binary compiled with `-ldflags "-X main.buildID=$(git rev-parse --short HEAD)"` — injects git short hash
+2. Go API exposes `GET /api/version` returning `{"build_id": "c88eadb"}`
+3. Makefile writes the same buildID to `app/assets/bin/build_id.txt` at build time
+4. Flutter `BackendService.ensureRunning()` reads `rootBundle.loadString('assets/bin/build_id.txt')` as expected buildID
+5. If daemon is alive but buildID doesn't match → `pkill -f token_gate.*--daemon` → start new binary
+
+**Key files:**
+- `server/main.go` — `var buildID = "dev"` (overridden at compile time)
+- `server/internal/api/api.go` — `API.buildID` field, `/api/version` endpoint
+- `server/Makefile` — all `go build` commands pass `-ldflags`, `build_id.txt` written for `app` and `windows-app` targets
+- `app/lib/services/backend_service.dart` — `_loadExpectedBuildID()`, buildID comparison in `ensureRunning()`
+- `app/lib/services/api_service.dart` — `getBuildID()` method
+
+## Config List Sorting (last_used_at)
+
+Configs are sorted by: active first → `last_used_at` DESC → `created_at` DESC.
+
+- `token_config.last_used_at` — `INTEGER NOT NULL DEFAULT 0`, millisecond Unix timestamp
+- Updated on `ActivateTokenConfig` (immediate) and `RecordUsage` (per request)
+- Flutter sort in `config_list.dart`: `_parseCreatedTs()` fallback parses RFC 3339 `created_at` string to ms
+- Backend `ORDER BY`: `COALESCE(NULLIF(last_used_at, 0), CAST(strftime('%s', created_at) * 1000 AS INTEGER)) DESC`
+
+## ConfigDetail State Lifecycle
+
+`ConfigDetail` is a `ConsumerStatefulWidget`. When the user switches selected config, Flutter may reuse the State object (same runtimeType, no key). The SSE subscription in `initState()` won't re-run.
+
+**Solution:** `didUpdateWidget` compares `oldWidget.config.id != widget.config.id`, and if changed:
+1. Cancels old SSE subscription
+2. Disconnects old SSE connection (`event_{oldId}`)
+3. Calls `_subscribeEvents()` with new configId
+4. Invalidates `usageStatsProvider` and `usagesProvider` to fetch latest data
+
+## Release Changelog
+
+### v0.2.5
+- **Fix:** ConfigDetail not updating when switching configs — added `didUpdateWidget` to re-subscribe SSE and refresh data
+- **Feat:** Config list sorts by last used time — `last_used_at` updated on activate and each request, fallback to creation time
+- **Feat:** Daemon buildID check on startup — app detects and replaces outdated daemons after upgrade
+- **Fix:** VSCode debug `launch.json` PATH includes rvm/CocoaPods
+
+### v0.2.4
+- Windows installer support (Inno Setup)
+- Windows tray icon and close-to-tray behavior
+
 ## Claude Code Rules
 
 - **环境变量同步**：执行需要环境变量的脚本（如 release.sh）之前，必须先 `source ~/.zshrc 2>/dev/null; source ~/.zprofile 2>/dev/null` 以加载用户 shell 配置中的环境变量。不要假设 Claude Code 的 Bash 工具会自动继承用户在终端中设置的变量。
