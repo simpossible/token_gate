@@ -75,6 +75,12 @@ class _HomeViewState extends ConsumerState<HomeView> with WindowListener {
     windowManager.hide();
   }
 
+  // Check for updates when app returns to foreground
+  @override
+  void onWindowFocus() {
+    checkForUpdate(ref);
+  }
+
   void _openCreate() {
     setState(() {
       _editingConfig = null;
