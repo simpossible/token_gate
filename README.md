@@ -2,7 +2,7 @@
 
 本地 Claude API 代理网关，为 AI 编程工具（Claude Code、Cursor 等）提供多 Key 管理、实时切换和 Token 用量可视化。
 
-官网：https://tokengate.mikevillage.com/index.html
+官网：https://tokengate.mikevillage.com
 
 ## 功能
 
